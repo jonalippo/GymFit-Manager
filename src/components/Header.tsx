@@ -38,7 +38,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex flex-col min-w-0">
             <div className="flex items-center">
               <span className="font-display text-sm sm:text-base font-black tracking-tight text-white leading-none whitespace-nowrap truncate">
-                GymFitPro<span className="text-emerald-400 font-extrabold ml-0.5">Manager</span>
+                GymFit <span className="text-emerald-400 font-extrabold ml-0.5">Manager</span>
               </span>
             </div>
             <span className="text-[9px] text-slate-400 font-mono tracking-wider uppercase leading-tight mt-0.5 hidden sm:inline">

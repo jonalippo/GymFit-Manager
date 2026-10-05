@@ -1,5 +1,5 @@
 {
-  "name": "GymFitPro Manager - SaaS de Entrenamiento y Evaluación Biomecánica",
+  "name": "GymFit Manager",
   "description": "Plataforma PWA offline-first para entrenadores: gestión clínica, evaluación biomecánica Demanda vs. Capacidad, rutinas interactivas y modo sala.",
   "requestFramePermissions": [],
   "majorCapabilities": [

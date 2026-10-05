@@ -99,7 +99,7 @@ export async function seedInitialDataIfEmpty() {
     auth_user_id: 'auth-user-marcos',
     organizacion_id: 'org-1',
     rol: 'admin_gimnasio',
-    nombre: 'Lic. Marcos Varela',
+    nombre: 'Jonatan Lippo',
     email: 'marcos@fitpro.io'
   };
 
