@@ -8,8 +8,6 @@ import {
   Plus,
   Trash2,
   Copy,
-  ArrowUp,
-  ArrowDown,
   BookOpen,
   Calendar,
   Check,
@@ -28,6 +26,10 @@ interface RoutineSpreadsheetProps {
   rutinas: Rutina[];
   evaluacion?: EvaluacionClinica | null;
   allAlumnos?: Alumno[];
+  savedActiveBlockId?: string;
+  onActiveBlockChange?: (blockId: string) => void;
+  savedActiveRoutineId?: string;
+  onActiveRoutineChange?: (routineId: string) => void;
   onSaveRoutine: (rutina: Rutina) => Promise<void>;
   onCreateNewRoutine: (alumnoId: string) => Promise<Rutina | void>;
   onDeleteRoutine?: (rutinaId: string) => Promise<void>;
@@ -41,67 +43,159 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
   rutinas,
   evaluacion,
   allAlumnos = [],
+  savedActiveBlockId,
+  onActiveBlockChange,
+  savedActiveRoutineId,
+  onActiveRoutineChange,
   onSaveRoutine,
   onCreateNewRoutine,
   onDeleteRoutine,
   onBackToAlumnos,
   onSwitchStudent,
 }) => {
-  // Active Routine
-  const [activeRoutineId, setActiveRoutineId] = useState<string>(
-    rutinas.find((r) => r.activa)?.id || rutinas[0]?.id || ''
-  );
+  // Filtrar rutinas que pertenecen estrictamente a este alumno
+  const studentRoutines = rutinas.filter((r) => r.alumno_id === alumno.id);
 
-  const currentRoutine = rutinas.find((r) => r.id === activeRoutineId) || rutinas[0];
-  const [activeBlockId, setActiveBlockId] = useState<string>(
-    currentRoutine?.bloques[0]?.id || ''
-  );
+  // Rutina activa con persistencia por alumno
+  const [activeRoutineId, setActiveRoutineId] = useState<string>(() => {
+    if (savedActiveRoutineId && studentRoutines.some((r) => r.id === savedActiveRoutineId)) {
+      return savedActiveRoutineId;
+    }
+    try {
+      const saved = localStorage.getItem(`fitpro_active_routine_${alumno.id}`);
+      if (saved && studentRoutines.some((r) => r.id === saved)) {
+        return saved;
+      }
+    } catch {}
+    return studentRoutines.find((r) => r.activa)?.id || studentRoutines[0]?.id || '';
+  });
 
-  // View mode for desktop (cards vs table)
+  const currentRoutine = studentRoutines.find((r) => r.id === activeRoutineId) || studentRoutines[0] || null;
+
+  // Bloque / Día activo con persistencia por alumno (recuerda si estabas en Día 1, Día 2, etc.)
+  const [activeBlockId, setActiveBlockId] = useState<string>(() => {
+    if (savedActiveBlockId && currentRoutine?.bloques.some((b) => b.id === savedActiveBlockId)) {
+      return savedActiveBlockId;
+    }
+    try {
+      const saved = localStorage.getItem(`fitpro_active_block_${alumno.id}`);
+      if (saved && currentRoutine?.bloques.some((b) => b.id === saved)) {
+        return saved;
+      }
+    } catch {}
+    return currentRoutine?.bloques[0]?.id || '';
+  });
+
+  // Guardar y notificar cambio de bloque para que al cambiar de pestaña no se reinicie
+  const handleSelectBlock = (blockId: string) => {
+    setActiveBlockId(blockId);
+    try {
+      localStorage.setItem(`fitpro_active_block_${alumno.id}`, blockId);
+    } catch {}
+    if (onActiveBlockChange) {
+      onActiveBlockChange(blockId);
+    }
+  };
+
+  // Guardar y notificar cambio de fase/rutina
+  const handleSelectRoutine = (routineId: string) => {
+    setActiveRoutineId(routineId);
+    try {
+      localStorage.setItem(`fitpro_active_routine_${alumno.id}`, routineId);
+    } catch {}
+    if (onActiveRoutineChange) {
+      onActiveRoutineChange(routineId);
+    }
+  };
+
+  // Modo de vista: tabla (planilla) vs tarjetas
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
 
-  // Exercise Delete Confirmation Modal
+  // Modal de confirmación para eliminar ejercicio
   const [exerciseToDelete, setExerciseToDelete] = useState<{ rowIdx: number; name: string } | null>(null);
 
-  // Routine Delete Confirmation Modal
+  // Modal de confirmación para eliminar rutina
   const [showDeleteRoutineModal, setShowDeleteRoutineModal] = useState(false);
 
-  // Biomechanical library picker
+  // Banco de ejercicios
   const [showLibrary, setShowLibrary] = useState(false);
   const [libraryFilter, setLibraryFilter] = useState('');
   const [targetRowForLibrary, setTargetRowForLibrary] = useState<number | null>(null);
 
-  // Routine Meta Editor Modal
+  // Modal de fechas y notas generales
   const [showMetaModal, setShowMetaModal] = useState(false);
   const [editRoutineName, setEditRoutineName] = useState('');
   const [editFechaInicio, setEditFechaInicio] = useState('');
   const [editFechaCambio, setEditFechaCambio] = useState('');
   const [editNotasGenerales, setEditNotasGenerales] = useState('');
 
-  // Inline Routine Name Editor
+  // Edición del nombre de la rutina en línea
   const [isEditingRoutineName, setIsEditingRoutineName] = useState(false);
   const [inlineRoutineName, setInlineRoutineName] = useState('');
 
-  // Day Rename state
+  // Renombrar sub-pestaña (Día)
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [blockNameInput, setBlockNameInput] = useState('');
 
-  // Local state
+  // Estado local de la rutina activa
   const [localRoutine, setLocalRoutine] = useState<Rutina | null>(currentRoutine || null);
 
+  // Sincronizar estado cuando cambie el alumno o las rutinas SIN resetear el día seleccionado
   useEffect(() => {
-    if (currentRoutine) {
-      setLocalRoutine(currentRoutine);
-      setEditRoutineName(currentRoutine.nombre_rutina);
-      setInlineRoutineName(currentRoutine.nombre_rutina);
-      setEditFechaInicio(currentRoutine.fecha_inicio);
-      setEditFechaCambio(currentRoutine.fecha_cambio);
-      setEditNotasGenerales(currentRoutine.notas_generales || '');
-      if (!currentRoutine.bloques.some((b) => b.id === activeBlockId)) {
-        setActiveBlockId(currentRoutine.bloques[0]?.id || '');
+    const validRoutines = rutinas.filter((r) => r.alumno_id === alumno.id);
+    const target =
+      validRoutines.find((r) => r.id === activeRoutineId) ||
+      validRoutines.find((r) => r.activa) ||
+      validRoutines[0] ||
+      null;
+
+    if (target) {
+      setActiveRoutineId(target.id);
+      setLocalRoutine(target);
+      setEditRoutineName(target.nombre_rutina);
+      setInlineRoutineName(target.nombre_rutina);
+      setEditFechaInicio(target.fecha_inicio);
+      setEditFechaCambio(target.fecha_cambio);
+      setEditNotasGenerales(target.notas_generales || '');
+
+      const savedBlock = savedActiveBlockId || localStorage.getItem(`fitpro_active_block_${alumno.id}`);
+      if (activeBlockId && target.bloques.some((b) => b.id === activeBlockId)) {
+        // Mantener el bloque actual
+      } else if (savedBlock && target.bloques.some((b) => b.id === savedBlock)) {
+        setActiveBlockId(savedBlock);
+      } else {
+        setActiveBlockId(target.bloques[0]?.id || '');
+      }
+    } else {
+      if (validRoutines.length === 0 && !localRoutine) {
+        setActiveRoutineId('');
+        setActiveBlockId('');
+        setLocalRoutine(null);
       }
     }
-  }, [activeRoutineId, currentRoutine]);
+  }, [alumno.id, rutinas, savedActiveBlockId]);
+
+  // Sincronizar cuando el usuario cambia de rutina del mismo alumno
+  useEffect(() => {
+    const validRoutines = rutinas.filter((r) => r.alumno_id === alumno.id);
+    const target = validRoutines.find((r) => r.id === activeRoutineId);
+    if (target) {
+      setLocalRoutine(target);
+      setEditRoutineName(target.nombre_rutina);
+      setInlineRoutineName(target.nombre_rutina);
+      setEditFechaInicio(target.fecha_inicio);
+      setEditFechaCambio(target.fecha_cambio);
+      setEditNotasGenerales(target.notas_generales || '');
+      if (!target.bloques.some((b) => b.id === activeBlockId)) {
+        const savedBlock = savedActiveBlockId || localStorage.getItem(`fitpro_active_block_${alumno.id}`);
+        if (savedBlock && target.bloques.some((b) => b.id === savedBlock)) {
+          setActiveBlockId(savedBlock);
+        } else {
+          setActiveBlockId(target.bloques[0]?.id || '');
+        }
+      }
+    }
+  }, [activeRoutineId, savedActiveBlockId]);
 
   const activeBlock = localRoutine?.bloques.find((b) => b.id === activeBlockId) || localRoutine?.bloques[0];
   const activeBlockIndex = localRoutine?.bloques.findIndex((b) => b.id === activeBlock?.id) ?? 0;
@@ -124,8 +218,8 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
   const handleCreateNewRoutineInstant = async () => {
     const created = await onCreateNewRoutine(alumno.id);
     if (created) {
-      setActiveRoutineId(created.id);
-      setActiveBlockId(created.bloques[0]?.id || '');
+      handleSelectRoutine(created.id);
+      handleSelectBlock(created.bloques[0]?.id || '');
       setLocalRoutine(created);
     }
   };
@@ -159,12 +253,12 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
       id: 'ej-' + Date.now() + Math.random().toString(36).substr(2, 4),
       bloque_id: activeBlock.id,
       orden: atIndex + 1,
-      ejercicio: 'Nuevo Ejercicio',
+      ejercicio: '',
       series: '3',
       repeticiones: '10',
-      carga: '10 kg',
-      pausa: '60s',
-      observaciones_dosificacion: 'Mantener control motor sin compensaciones.'
+      carga: '',
+      pausa: "60''",
+      observaciones_dosificacion: ''
     };
 
     const newExs = [...activeBlock.ejercicios];
@@ -190,11 +284,11 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
           id: 'ej-' + Date.now(),
           bloque_id: activeBlock.id,
           orden: 1,
-          ejercicio: 'Nuevo Ejercicio',
+          ejercicio: '',
           series: '3',
           repeticiones: '10',
           carga: '',
-          pausa: '60s',
+          pausa: "60''",
           observaciones_dosificacion: ''
         }
       ];
@@ -225,31 +319,11 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     const cloned: EjercicioRutina = {
       ...source,
       id: 'ej-' + Date.now() + Math.random().toString(36).substr(2, 4),
-      ejercicio: `${source.ejercicio} (Variante)`
+      orden: rowIdx + 2
     };
 
     const newExs = [...activeBlock.ejercicios];
     newExs.splice(rowIdx + 1, 0, cloned);
-    newExs.forEach((e, idx) => (e.orden = idx + 1));
-
-    const updatedBlocks = localRoutine.bloques.map((b) =>
-      b.id === activeBlock.id ? { ...b, ejercicios: newExs } : b
-    );
-
-    const updatedRoutine = { ...localRoutine, bloques: updatedBlocks, updated_at: new Date().toISOString() };
-    setLocalRoutine(updatedRoutine);
-    onSaveRoutine(updatedRoutine);
-  };
-
-  const handleMoveRow = (rowIdx: number, direction: 'up' | 'down') => {
-    if (!localRoutine || !activeBlock) return;
-    const targetIdx = direction === 'up' ? rowIdx - 1 : rowIdx + 1;
-    if (targetIdx < 0 || targetIdx >= activeBlock.ejercicios.length) return;
-
-    const newExs = [...activeBlock.ejercicios];
-    const temp = newExs[rowIdx];
-    newExs[rowIdx] = newExs[targetIdx];
-    newExs[targetIdx] = temp;
     newExs.forEach((e, idx) => (e.orden = idx + 1));
 
     const updatedBlocks = localRoutine.bloques.map((b) =>
@@ -267,19 +341,19 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     const newBlock: BloqueRutina = {
       id: 'blk-' + Date.now(),
       rutina_id: localRoutine.id,
-      nombre_sub_pestana: `Día ${blockNum}: Bloque de Entrenamiento`,
+      nombre_sub_pestana: `Día ${blockNum}: Principal`,
       orden: blockNum,
       ejercicios: [
         {
           id: 'ej-' + Date.now(),
           bloque_id: 'blk-' + Date.now(),
           orden: 1,
-          ejercicio: 'Sentadilla Goblet con Talones Elevados',
+          ejercicio: '',
           series: '3',
-          repeticiones: '10-12',
-          carga: '12 kg',
-          pausa: '75s',
-          observaciones_dosificacion: 'Mantener tronco vertical y control excéntrico.'
+          repeticiones: '10',
+          carga: '',
+          pausa: "60''",
+          observaciones_dosificacion: ''
         }
       ]
     };
@@ -290,7 +364,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
       updated_at: new Date().toISOString()
     };
     setLocalRoutine(updatedRoutine);
-    setActiveBlockId(newBlock.id);
+    handleSelectBlock(newBlock.id);
     onSaveRoutine(updatedRoutine);
   };
 
@@ -305,7 +379,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
       updated_at: new Date().toISOString()
     };
     setLocalRoutine(updatedRoutine);
-    setActiveBlockId(nextActive);
+    handleSelectBlock(nextActive);
     onSaveRoutine(updatedRoutine);
   };
 
@@ -395,7 +469,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
 
   return (
     <div className="w-full max-w-full space-y-4 pb-28 overflow-x-hidden">
-      {/* 0. TOP ACTION BAR WITH PROMINENT BACK BUTTON */}
+      {/* 0. BARRA SUPERIOR: DATOS DEL ALUMNO Y ACCIONES RÁPIDAS */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/90 border border-slate-800 p-3 sm:p-4 rounded-2xl shadow-sm">
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <button
@@ -417,7 +491,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
           </div>
         </div>
 
-        {/* Export & Switcher Buttons */}
+        {/* Botones de Exportar y Selector de Alumnos */}
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => exportRoutineToPDF(alumno, localRoutine, evaluacion)}
@@ -455,10 +529,11 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
       </div>
 
       {/* 1. SELECCIÓN DE RUTINA, NOMBRE EDITABLE EN LÍNEA & CONFIGURACIÓN */}
-      <div className="p-3 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm space-y-3">
-        {/* Routine Name (Editable like days) & Dates Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-          <div className="flex items-center gap-2 min-w-0 flex-1">
+      <div className="p-3 sm:p-4 rounded-2xl bg-[#0b101b] border border-slate-800 shadow-sm space-y-4">
+        {/* Fila superior: Título de Rutina + Fechas + Selector + Nueva Rutina */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Título de Rutina con punto verde y lápiz */}
+          <div className="flex items-center gap-2 min-w-0">
             {isEditingRoutineName ? (
               <div className="flex items-center gap-1.5 w-full max-w-md">
                 <input
@@ -489,8 +564,8 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2 min-w-0">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0" />
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0 shadow-sm shadow-emerald-400/50" />
                 <h2 className="text-base sm:text-lg font-black text-white tracking-tight truncate">
                   {localRoutine.nombre_rutina}
                 </h2>
@@ -500,19 +575,21 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                     setInlineRoutineName(localRoutine.nombre_rutina);
                     setIsEditingRoutineName(true);
                   }}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition shrink-0"
+                  className="p-1 rounded-lg text-emerald-400 hover:text-white hover:bg-slate-800 transition shrink-0"
                   title="Editar nombre de la rutina directamente"
                 >
-                  <Edit2 className="w-3.5 h-3.5 text-emerald-400" />
+                  <Edit2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             )}
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          {/* Botones y Selector de Rutina */}
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            {/* Fechas */}
             <button
               onClick={() => setShowMetaModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-[11px] text-slate-300 font-mono hover:border-slate-700 transition"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 font-mono hover:border-slate-700 transition"
               title="Configurar ciclo de fechas"
             >
               <Calendar className="w-3.5 h-3.5 text-emerald-400" />
@@ -520,12 +597,13 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               <Settings className="w-3 h-3 text-slate-400" />
             </button>
 
+            {/* Selector de Rutinas */}
             {rutinas.length > 1 && (
               <div className="flex items-center gap-1">
                 <select
                   value={activeRoutineId}
-                  onChange={(e) => setActiveRoutineId(e.target.value)}
-                  className="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 font-semibold"
+                  onChange={(e) => handleSelectRoutine(e.target.value)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 font-semibold focus:outline-none focus:border-emerald-500"
                 >
                   {rutinas.map((r, i) => (
                     <option key={r.id} value={r.id}>
@@ -546,28 +624,26 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               </div>
             )}
 
+            {/* Botón + Nueva Rutina */}
             <button
               type="button"
               onClick={handleCreateNewRoutineInstant}
-              className="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600 text-emerald-300 hover:text-white border border-emerald-500/40 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 shadow-sm"
+              className="px-3.5 py-1.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500 text-emerald-400 font-bold text-xs flex items-center gap-1.5 transition active:scale-95 shadow-sm"
               title="Crear nueva rutina para este alumno"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>+ Nueva Rutina</span>
+              <span>Nueva Rutina</span>
             </button>
           </div>
         </div>
 
-        {/* 2. DÍAS DE RUTINA: DISEÑO MODERNO Y ELEGANTE (CERO SCROLL HORIZONTAL) */}
-        <div className="pt-2 border-t border-slate-800/80">
-          <div className="flex items-center justify-between mb-2">
-            <label className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
-              Días / Bloques de Entrenamiento
-            </label>
-          </div>
+        {/* Sección: DÍAS / BLOQUES DE ENTRENAMIENTO */}
+        <div className="space-y-2 pt-1">
+          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">
+            DÍAS / BLOQUES DE ENTRENAMIENTO
+          </label>
 
-          {/* Day Buttons Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:flex md:flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {localRoutine.bloques.map((b, idx) => {
               const isActive = b.id === activeBlockId;
               const count = b.ejercicios.length;
@@ -575,19 +651,17 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               return (
                 <button
                   key={b.id}
-                  onClick={() => setActiveBlockId(b.id)}
-                  className={`p-2.5 sm:px-4 sm:py-2.5 rounded-xl text-left transition-all active:scale-95 border flex flex-col md:flex-row md:items-center justify-between gap-1 md:gap-3 ${
+                  onClick={() => handleSelectBlock(b.id)}
+                  className={`px-4 py-2 rounded-xl text-left transition-all active:scale-95 border flex items-center gap-2 text-xs sm:text-sm ${
                     isActive
-                      ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white border-emerald-400/80 shadow-md shadow-emerald-950/50 ring-1 ring-emerald-400'
-                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:bg-slate-900'
+                      ? 'bg-emerald-600 text-white border-emerald-400 font-bold shadow-md shadow-emerald-950/40'
+                      : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:bg-slate-900 font-semibold'
                   }`}
                 >
-                  <div className="flex items-center gap-2">
-                    <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-white' : 'bg-emerald-500'}`} />
-                    <span className="font-extrabold text-xs sm:text-sm tracking-tight">Día {idx + 1}</span>
-                  </div>
-                  <span className={`text-[10px] sm:text-[11px] font-mono ${isActive ? 'text-emerald-100' : 'text-slate-400'}`}>
-                    {count} {count === 1 ? 'ejer.' : 'ejer.'}
+                  <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-white' : 'bg-emerald-500'}`} />
+                  <span>Día {idx + 1}</span>
+                  <span className={`text-[11px] font-mono ${isActive ? 'text-emerald-100 font-normal' : 'text-slate-400'}`}>
+                    {count} ejer.
                   </span>
                 </button>
               );
@@ -595,16 +669,19 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
 
             <button
               onClick={handleAddBlock}
-              className="p-2.5 sm:px-4 sm:py-2.5 rounded-xl border border-dashed border-slate-700 bg-slate-950/40 hover:bg-slate-900 hover:border-emerald-500/60 text-slate-400 hover:text-emerald-400 text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95"
+              className="px-3.5 py-2 rounded-xl border border-dashed border-slate-700 bg-slate-950/60 hover:bg-slate-900 hover:border-emerald-500 text-slate-300 hover:text-emerald-400 text-xs font-bold flex items-center gap-1.5 transition active:scale-95"
             >
               <Plus className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Nuevo Día</span>
+              <span>+ Nuevo Día</span>
             </button>
           </div>
+        </div>
 
-          {/* Active Day Header Banner */}
-          {activeBlock && (
-            <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 p-3 rounded-xl bg-slate-950 border border-slate-800">
+        {/* CONTENEDOR PRINCIPAL DEL DÍA ACTIVO CON LA PLANILLA */}
+        {activeBlock && (
+          <div className="rounded-2xl border border-slate-800 bg-[#070b14] overflow-hidden shadow-xl mt-3">
+            {/* Barra de cabecera del Día: "Día 1: Principal ✏️" + "Banco de Ejercicios" + "Planilla / Tarjetas" */}
+            <div className="p-3 sm:px-4 sm:py-3 border-b border-slate-800/80 bg-slate-950/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
                 {editingBlockId === activeBlock.id ? (
                   <div className="flex items-center gap-1.5 w-full max-w-sm">
@@ -621,23 +698,23 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                     />
                     <button
                       onClick={() => handleSaveBlockName(activeBlock.id)}
-                      className="p-1.5 bg-emerald-600 text-white rounded-lg"
+                      className="p-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500"
                     >
                       <Check className="w-3.5 h-3.5" />
                     </button>
                     <button
                       onClick={() => setEditingBlockId(null)}
-                      className="p-1.5 bg-slate-800 text-slate-300 rounded-lg"
+                      className="p-1.5 bg-slate-800 text-slate-300 rounded-lg hover:text-white"
                     >
                       <X className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-xs sm:text-sm font-extrabold text-emerald-400">
+                    <span className="text-sm sm:text-base font-extrabold text-emerald-400">
                       Día {activeBlockIndex + 1}:
                     </span>
-                    <span className="text-xs sm:text-sm font-bold text-white truncate">
+                    <span className="text-sm sm:text-base font-extrabold text-white truncate">
                       {activeBlock.nombre_sub_pestana.replace(/^Día \d+:\s*/, '')}
                     </span>
                     <button
@@ -645,51 +722,56 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                         setEditingBlockId(activeBlock.id);
                         setBlockNameInput(activeBlock.nombre_sub_pestana);
                       }}
-                      className="p-1 rounded text-slate-400 hover:text-white transition"
+                      className="p-1 rounded text-slate-400 hover:text-emerald-400 transition shrink-0"
                       title="Renombrar este día"
                     >
-                      <Edit2 className="w-3 h-3" />
+                      <Edit2 className="w-3.5 h-3.5" />
                     </button>
                     {localRoutine.bloques.length > 1 && (
                       <button
                         onClick={() => handleDeleteBlock(activeBlock.id)}
-                        className="p-1 rounded text-slate-500 hover:text-rose-400 transition"
+                        className="p-1 rounded text-slate-500 hover:text-rose-400 transition shrink-0"
                         title="Eliminar este día"
                       >
-                        <Trash2 className="w-3 h-3" />
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     )}
                   </div>
                 )}
               </div>
 
-              {/* Actions for active day */}
+              {/* Lado derecho: Banco de Ejercicios + Switcher Planilla / Tarjetas */}
               <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
                 <button
                   onClick={() => {
                     setTargetRowForLibrary(0);
                     setShowLibrary(true);
                   }}
-                  className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 hover:bg-slate-800 text-emerald-400 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 shadow-sm"
+                  className="px-3.5 py-1.5 rounded-xl border border-emerald-500/40 bg-slate-900/90 hover:bg-slate-850 text-emerald-400 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 shadow-sm"
                 >
-                  <BookOpen className="w-3.5 h-3.5" />
+                  <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
                   <span>Banco de Ejercicios</span>
                 </button>
 
-                {/* View switcher for desktop */}
-                <div className="hidden md:flex items-center bg-slate-900 border border-slate-800 rounded-xl p-0.5">
+                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-0.5">
                   <button
                     onClick={() => setViewMode('table')}
-                    className={`px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition ${viewMode === 'table' ? 'bg-slate-800 text-emerald-400 shadow-sm' : 'text-slate-400'}`}
-                    title="Vista planilla horizontal fluida"
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                      viewMode === 'table'
+                        ? 'bg-slate-900 text-emerald-400 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
                   >
                     <TableIcon className="w-3.5 h-3.5" />
                     <span>Planilla</span>
                   </button>
                   <button
                     onClick={() => setViewMode('cards')}
-                    className={`px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition ${viewMode === 'cards' ? 'bg-slate-800 text-emerald-400 shadow-sm' : 'text-slate-400'}`}
-                    title="Vista tarjetas táctiles"
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                      viewMode === 'cards'
+                        ? 'bg-slate-900 text-emerald-400 shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                    }`}
                   >
                     <LayoutGrid className="w-3.5 h-3.5" />
                     <span>Tarjetas</span>
@@ -697,378 +779,253 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                 </div>
               </div>
             </div>
-          )}
-        </div>
-      </div>
 
-      {/* 3. LISTA DE EJERCICIOS (MOBILE: TARJETAS GRANDES | DESKTOP: PLANILLA FLUIDA SIN SCROLL HORIZONTAL) */}
-      {activeBlock && (
-        <div className="space-y-3.5 w-full max-w-full overflow-x-hidden">
-          {/* MOBILE VIEW (< md): TARJETAS TÁCTILES GRANDES */}
-          <div className="block md:hidden space-y-3.5">
-            {activeBlock.ejercicios.map((ej, rowIdx) => (
-              <div
-                key={ej.id}
-                className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-md space-y-3"
-              >
-                {/* Header: Número de Ejercicio, Nombre en Grande y Acciones */}
-                <div className="flex items-start justify-between gap-2.5">
-                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                    <span className="w-8 h-8 rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 text-emerald-400 font-extrabold text-sm flex items-center justify-center shrink-0 shadow-sm">
-                      #{ej.orden || rowIdx + 1}
-                    </span>
-                      <div className="min-w-0 flex-1">
-                        <textarea
-                          rows={ej.ejercicio.length > 20 ? 2 : 1}
+            {/* TABLA ESTILO PLANILLA EXACTA COMO EN LA IMAGEN */}
+            {viewMode === 'table' ? (
+              <div className="w-full overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="bg-slate-950/80 text-slate-400 font-bold border-b border-slate-800/80 uppercase tracking-wider text-[11px] font-mono">
+                      <th className="py-3 px-3 w-10 text-center">#</th>
+                      <th className="py-3 px-3 min-w-[220px]">EJERCICIO</th>
+                      <th className="py-3 px-2 w-20 text-center">SERIES</th>
+                      <th className="py-3 px-2 w-20 text-center">REPS</th>
+                      <th className="py-3 px-2 w-28 text-center">CARGA (KG)</th>
+                      <th className="py-3 px-2 w-20 text-center">PAUSA</th>
+                      <th className="py-3 px-3 min-w-[220px]">OBSERVACIONES</th>
+                      <th className="py-3 px-2 w-28 text-center">ACCIONES</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/60 font-mono">
+                    {activeBlock.ejercicios.map((ej, rowIdx) => (
+                      <tr key={ej.id} className="hover:bg-slate-900/60 transition group">
+                        {/* # */}
+                        <td className="py-3 px-3 text-center text-slate-400 font-bold text-xs">
+                          {ej.orden || rowIdx + 1}
+                        </td>
+
+                        {/* EJERCICIO */}
+                        <td className="py-2.5 px-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <textarea
+                              rows={ej.ejercicio.length > 25 ? 2 : 1}
+                              value={ej.ejercicio}
+                              onChange={(e) => handleUpdateExercise(rowIdx, 'ejercicio', e.target.value)}
+                              placeholder="Nombre del ejercicio..."
+                              className="w-full bg-transparent font-sans font-bold text-white text-xs sm:text-sm resize-none focus:outline-none focus:bg-slate-900/80 px-1 py-1 rounded leading-snug"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTargetRowForLibrary(rowIdx);
+                                setShowLibrary(true);
+                              }}
+                              className="p-1 rounded text-slate-500 hover:text-emerald-400 shrink-0 transition"
+                              title="Banco de ejercicios"
+                            >
+                              <Sparkles className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+
+                        {/* SERIES */}
+                        <td className="py-2.5 px-2 text-center">
+                          <input
+                            type="text"
+                            value={ej.series}
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'series', e.target.value)}
+                            className="w-full bg-transparent text-center font-bold text-white text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
+                          />
+                        </td>
+
+                        {/* REPS */}
+                        <td className="py-2.5 px-2 text-center">
+                          <input
+                            type="text"
+                            value={ej.repeticiones}
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'repeticiones', e.target.value)}
+                            className="w-full bg-transparent text-center font-bold text-white text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
+                          />
+                        </td>
+
+                        {/* CARGA (KG) - Verde brillante como en la imagen */}
+                        <td className="py-2.5 px-2 text-center">
+                          <input
+                            type="text"
+                            value={ej.carga || ''}
+                            placeholder="-"
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'carga', e.target.value)}
+                            className="w-full bg-transparent text-center font-bold text-emerald-400 text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
+                          />
+                        </td>
+
+                        {/* PAUSA */}
+                        <td className="py-2.5 px-2 text-center">
+                          <input
+                            type="text"
+                            value={ej.pausa}
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'pausa', e.target.value)}
+                            className="w-full bg-transparent text-center font-bold text-slate-200 text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
+                          />
+                        </td>
+
+                        {/* OBSERVACIONES */}
+                        <td className="py-2.5 px-3">
+                          <input
+                            type="text"
+                            value={ej.observaciones_dosificacion}
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'observaciones_dosificacion', e.target.value)}
+                            placeholder="Observaciones de dosificación..."
+                            className="w-full bg-transparent text-slate-300 text-xs font-sans focus:outline-none focus:bg-slate-900/80 px-2 py-1 rounded"
+                          />
+                        </td>
+
+                        {/* ACCIONES */}
+                        <td className="py-2.5 px-2 text-center">
+                          <div className="flex items-center justify-center gap-1.5 text-slate-400">
+                            <button
+                              type="button"
+                              onClick={() => handleInsertRow(rowIdx + 1)}
+                              className="p-1 rounded hover:text-emerald-400 transition"
+                              title="Insertar debajo"
+                            >
+                              <Plus className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDuplicateRow(rowIdx)}
+                              className="p-1 rounded hover:text-white transition"
+                              title="Duplicar"
+                            >
+                              <Copy className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio || `Ejercicio #${rowIdx + 1}` })}
+                              className="p-1 rounded hover:text-rose-400 transition"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              /* VISTA TARJETAS (Si el usuario presiona "Tarjetas") */
+              <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
+                {activeBlock.ejercicios.map((ej, rowIdx) => (
+                  <div
+                    key={ej.id}
+                    className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                        <span className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold font-mono text-xs flex items-center justify-center shrink-0">
+                          {rowIdx + 1}
+                        </span>
+                        <input
+                          type="text"
                           value={ej.ejercicio}
                           onChange={(e) => handleUpdateExercise(rowIdx, 'ejercicio', e.target.value)}
                           placeholder="Nombre del ejercicio..."
-                          className="w-full bg-slate-950/80 font-bold text-white text-sm sm:text-base px-2.5 py-1.5 rounded-xl border border-slate-800 focus:border-emerald-500 focus:outline-none resize-none overflow-hidden leading-snug break-words min-h-[42px]"
+                          className="w-full bg-transparent font-bold text-white text-xs sm:text-sm focus:outline-none"
                         />
                       </div>
-                  </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => {
+                            setTargetRowForLibrary(rowIdx);
+                            setShowLibrary(true);
+                          }}
+                          className="p-1 text-slate-400 hover:text-emerald-400"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDuplicateRow(rowIdx)}
+                          className="p-1 text-slate-400 hover:text-white"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio || `Ejercicio #${rowIdx + 1}` })}
+                          className="p-1 text-slate-400 hover:text-rose-400"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
 
-                  <div className="flex items-center gap-1 shrink-0 pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setTargetRowForLibrary(rowIdx);
-                        setShowLibrary(true);
-                      }}
-                      className="p-1.5 rounded-lg text-emerald-400 bg-slate-950 border border-slate-800 hover:bg-slate-800"
-                      title="Sustituir desde banco biomecánico"
-                    >
-                      <Sparkles className="w-4 h-4" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDuplicateRow(rowIdx)}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-white bg-slate-950 border border-slate-800"
-                      title="Duplicar"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio || `Ejercicio #${rowIdx + 1}` })}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 bg-slate-950 border border-slate-800 active:scale-95 transition"
-                      title="Eliminar ejercicio"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                {/* 4 Cajas Grandes Táctiles: Series, Reps, Carga (Kg), Pausa */}
-                <div className="grid grid-cols-4 gap-2">
-                  <div className="p-2 sm:p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-center">
-                    <span className="block text-[10px] text-slate-400 font-extrabold uppercase tracking-wider mb-0.5">Series</span>
-                    <input
-                      type="text"
-                      value={ej.series}
-                      onChange={(e) => handleUpdateExercise(rowIdx, 'series', e.target.value)}
-                      className="w-full bg-transparent text-center font-extrabold text-white text-base sm:text-lg font-mono focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="p-2 sm:p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-center">
-                    <span className="block text-[10px] text-slate-400 font-extrabold uppercase tracking-wider mb-0.5">Reps</span>
-                    <input
-                      type="text"
-                      value={ej.repeticiones}
-                      onChange={(e) => handleUpdateExercise(rowIdx, 'repeticiones', e.target.value)}
-                      className="w-full bg-transparent text-center font-extrabold text-white text-base sm:text-lg font-mono focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="p-2 sm:p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-center">
-                    <span className="block text-[10px] text-emerald-400 font-extrabold uppercase tracking-wider mb-0.5">Carga (Kg)</span>
-                    <input
-                      type="text"
-                      value={ej.carga || ''}
-                      placeholder="-"
-                      onChange={(e) => handleUpdateExercise(rowIdx, 'carga', e.target.value)}
-                      className="w-full bg-transparent text-center font-extrabold text-emerald-400 text-base sm:text-lg font-mono focus:outline-none"
-                    />
-                  </div>
-
-                  <div className="p-2 sm:p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-center">
-                    <span className="block text-[10px] text-slate-400 font-extrabold uppercase tracking-wider mb-0.5">Pausa</span>
-                    <input
-                      type="text"
-                      value={ej.pausa}
-                      onChange={(e) => handleUpdateExercise(rowIdx, 'pausa', e.target.value)}
-                      className="w-full bg-transparent text-center font-extrabold text-slate-200 text-base sm:text-lg font-mono focus:outline-none"
-                    />
-                  </div>
-                </div>
-
-                {/* Observaciones */}
-                <div className="space-y-1.5 pt-1">
-                  <label className="block text-[11px] text-slate-400 font-semibold">
-                    Observaciones:
-                  </label>
-                  <input
-                    type="text"
-                    value={ej.observaciones_dosificacion}
-                    onChange={(e) => handleUpdateExercise(rowIdx, 'observaciones_dosificacion', e.target.value)}
-                    placeholder="Instrucción de ejecución, tempo o criterio..."
-                    className="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-200 text-xs focus:outline-none focus:border-emerald-500"
-                  />
-
-                  {/* Move Up/Down Controls for Mobile */}
-                  <div className="flex items-center justify-end gap-2 pt-1 text-[11px] text-slate-400">
-                    <button
-                      type="button"
-                      disabled={rowIdx === 0}
-                      onClick={() => handleMoveRow(rowIdx, 'up')}
-                      className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 disabled:opacity-30 flex items-center gap-1 hover:text-white"
-                    >
-                      <ArrowUp className="w-3.5 h-3.5" />
-                      <span>Subir</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={rowIdx === activeBlock.ejercicios.length - 1}
-                      onClick={() => handleMoveRow(rowIdx, 'down')}
-                      className="px-2 py-1 rounded-lg bg-slate-950 border border-slate-800 disabled:opacity-30 flex items-center gap-1 hover:text-white"
-                    >
-                      <ArrowDown className="w-3.5 h-3.5" />
-                      <span>Bajar</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* DESKTOP VIEW (>= md): TABLE (CERO HORIZONTAL SCROLL) OR CARDS BASED ON TOGGLE */}
-          {viewMode === 'table' ? (
-            <div className="hidden md:block rounded-2xl border border-slate-800 bg-slate-950 overflow-hidden shadow-sm w-full">
-              <table className="w-full table-fixed text-left text-xs border-collapse">
-                <thead>
-                  <tr className="bg-slate-900/90 text-slate-400 font-semibold border-b border-slate-800 uppercase tracking-wider text-[10px]">
-                    <th className="py-3 px-2 w-9 text-center">#</th>
-                    <th className="py-3 px-3 w-[30%]">Ejercicio</th>
-                    <th className="py-3 px-2 w-16 text-center">Series</th>
-                    <th className="py-3 px-2 w-20 text-center">Reps</th>
-                    <th className="py-3 px-2 w-24 text-center">Carga (Kg)</th>
-                    <th className="py-3 px-2 w-20 text-center">Pausa</th>
-                    <th className="py-3 px-3 w-[28%]">Observaciones</th>
-                    <th className="py-3 px-2 w-20 text-center">Acciones</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 font-mono">
-                  {activeBlock.ejercicios.map((ej, rowIdx) => (
-                    <tr key={ej.id} className="hover:bg-slate-900/50 transition-colors">
-                      <td className="py-2.5 px-2 text-center text-slate-500 font-bold text-xs">
-                        {ej.orden || rowIdx + 1}
-                      </td>
-
-                      <td className="py-1 px-2.5">
-                        <div className="flex items-center gap-1.5">
-                          <textarea
-                            rows={ej.ejercicio.length > 20 ? 2 : 1}
-                            value={ej.ejercicio}
-                            onChange={(e) => handleUpdateExercise(rowIdx, 'ejercicio', e.target.value)}
-                            placeholder="Nombre del ejercicio..."
-                            className="w-full px-2 py-1.5 rounded-lg bg-transparent hover:bg-slate-900 focus:bg-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 text-white font-sans font-bold text-xs sm:text-sm resize-none overflow-hidden leading-snug break-words min-h-[38px]"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setTargetRowForLibrary(rowIdx);
-                              setShowLibrary(true);
-                            }}
-                            title="Seleccionar del banco biomecánico"
-                            className="p-1 rounded text-slate-500 hover:text-emerald-400 shrink-0"
-                          >
-                            <Sparkles className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-
-                      <td className="py-1 px-1">
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800">
+                        <span className="block text-[10px] text-slate-400 uppercase font-mono">Series</span>
                         <input
                           type="text"
                           value={ej.series}
                           onChange={(e) => handleUpdateExercise(rowIdx, 'series', e.target.value)}
-                          className="w-full px-1 py-1 rounded bg-transparent hover:bg-slate-900 text-center text-xs font-mono font-bold text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          className="w-full text-center bg-transparent font-bold text-white focus:outline-none"
                         />
-                      </td>
-
-                      <td className="py-1 px-1">
+                      </div>
+                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800">
+                        <span className="block text-[10px] text-slate-400 uppercase font-mono">Reps</span>
                         <input
                           type="text"
                           value={ej.repeticiones}
                           onChange={(e) => handleUpdateExercise(rowIdx, 'repeticiones', e.target.value)}
-                          className="w-full px-1 py-1 rounded bg-transparent hover:bg-slate-900 text-center text-xs font-mono font-bold text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          className="w-full text-center bg-transparent font-bold text-white focus:outline-none"
                         />
-                      </td>
-
-                      <td className="py-1 px-1">
+                      </div>
+                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800">
+                        <span className="block text-[10px] text-emerald-400 uppercase font-mono">Carga</span>
                         <input
                           type="text"
                           value={ej.carga || ''}
                           placeholder="-"
                           onChange={(e) => handleUpdateExercise(rowIdx, 'carga', e.target.value)}
-                          className="w-full px-1 py-1 rounded bg-transparent hover:bg-slate-900 text-center text-xs font-mono font-bold text-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          className="w-full text-center bg-transparent font-bold text-emerald-400 focus:outline-none"
                         />
-                      </td>
-
-                      <td className="py-1 px-1">
+                      </div>
+                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800">
+                        <span className="block text-[10px] text-slate-400 uppercase font-mono">Pausa</span>
                         <input
                           type="text"
                           value={ej.pausa}
                           onChange={(e) => handleUpdateExercise(rowIdx, 'pausa', e.target.value)}
-                          className="w-full px-1 py-1 rounded bg-transparent hover:bg-slate-900 text-center text-xs font-mono font-bold text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                          className="w-full text-center bg-transparent font-bold text-slate-200 focus:outline-none"
                         />
-                      </td>
-
-                      <td className="py-1 px-2.5">
-                        <input
-                          type="text"
-                          value={ej.observaciones_dosificacion}
-                          onChange={(e) => handleUpdateExercise(rowIdx, 'observaciones_dosificacion', e.target.value)}
-                          placeholder="Observaciones de ejecución o criterio..."
-                          className="w-full px-2 py-1.5 rounded-lg bg-transparent hover:bg-slate-900 text-xs text-slate-200 font-sans focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                        />
-                      </td>
-
-                      <td className="py-1 px-1 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => handleInsertRow(rowIdx + 1)}
-                            className="p-1 rounded text-slate-400 hover:text-emerald-400"
-                            title="Insertar debajo"
-                          >
-                            <Plus className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDuplicateRow(rowIdx)}
-                            className="p-1 rounded text-slate-400 hover:text-white"
-                            title="Duplicar"
-                          >
-                            <Copy className="w-3 h-3" />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio || `Ejercicio #${rowIdx + 1}` })}
-                            className="p-1 rounded text-slate-400 hover:text-rose-400 transition"
-                            title="Eliminar ejercicio"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            /* Desktop Grid Cards */
-            <div className="hidden md:grid md:grid-cols-2 gap-3.5">
-              {activeBlock.ejercicios.map((ej, rowIdx) => (
-                <div key={ej.id} className="p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-sm space-y-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                      <span className="w-7 h-7 rounded-xl bg-slate-800 text-emerald-400 font-extrabold text-xs flex items-center justify-center shrink-0">
-                        #{ej.orden || rowIdx + 1}
-                      </span>
-                      <textarea
-                        rows={ej.ejercicio.length > 20 ? 2 : 1}
-                        value={ej.ejercicio}
-                        onChange={(e) => handleUpdateExercise(rowIdx, 'ejercicio', e.target.value)}
-                        placeholder="Nombre del ejercicio..."
-                        className="w-full bg-transparent font-bold text-white text-sm focus:outline-none resize-none overflow-hidden leading-snug break-words min-h-[40px]"
-                      />
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <button onClick={() => { setTargetRowForLibrary(rowIdx); setShowLibrary(true); }} className="p-1 text-emerald-400">
-                        <Sparkles className="w-4 h-4" />
-                      </button>
-                      <button onClick={() => handleDuplicateRow(rowIdx)} className="p-1 text-slate-400 hover:text-white">
-                        <Copy className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio || `Ejercicio #${rowIdx + 1}` })}
-                        className="p-1 text-slate-400 hover:text-rose-400 transition"
-                        title="Eliminar ejercicio"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+
+                    <input
+                      type="text"
+                      value={ej.observaciones_dosificacion}
+                      onChange={(e) => handleUpdateExercise(rowIdx, 'observaciones_dosificacion', e.target.value)}
+                      placeholder="Observaciones de dosificación..."
+                      className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-300 focus:outline-none"
+                    />
                   </div>
+                ))}
+              </div>
+            )}
 
-                  <div className="grid grid-cols-4 gap-2">
-                    <div className="p-2 rounded-xl bg-slate-950 text-center border border-slate-800/80">
-                      <span className="text-[10px] text-slate-400 block font-semibold uppercase">Series</span>
-                      <input
-                        type="text"
-                        value={ej.series}
-                        onChange={(e) => handleUpdateExercise(rowIdx, 'series', e.target.value)}
-                        className="w-full bg-transparent text-center font-bold text-white text-sm font-mono focus:outline-none"
-                      />
-                    </div>
-                    <div className="p-2 rounded-xl bg-slate-950 text-center border border-slate-800/80">
-                      <span className="text-[10px] text-slate-400 block font-semibold uppercase">Reps</span>
-                      <input
-                        type="text"
-                        value={ej.repeticiones}
-                        onChange={(e) => handleUpdateExercise(rowIdx, 'repeticiones', e.target.value)}
-                        className="w-full bg-transparent text-center font-bold text-white text-sm font-mono focus:outline-none"
-                      />
-                    </div>
-                    <div className="p-2 rounded-xl bg-slate-950 text-center border border-slate-800/80">
-                      <span className="text-[10px] text-emerald-400 block font-semibold uppercase">Carga (Kg)</span>
-                      <input
-                        type="text"
-                        value={ej.carga || ''}
-                        placeholder="-"
-                        onChange={(e) => handleUpdateExercise(rowIdx, 'carga', e.target.value)}
-                        className="w-full bg-transparent text-center font-bold text-emerald-400 text-sm font-mono focus:outline-none"
-                      />
-                    </div>
-                    <div className="p-2 rounded-xl bg-slate-950 text-center border border-slate-800/80">
-                      <span className="text-[10px] text-slate-400 block font-semibold uppercase">Pausa</span>
-                      <input
-                        type="text"
-                        value={ej.pausa}
-                        onChange={(e) => handleUpdateExercise(rowIdx, 'pausa', e.target.value)}
-                        className="w-full bg-transparent text-center font-bold text-slate-200 text-sm font-mono focus:outline-none"
-                      />
-                    </div>
-                  </div>
-
-                  <input
-                    type="text"
-                    value={ej.observaciones_dosificacion}
-                    onChange={(e) => handleUpdateExercise(rowIdx, 'observaciones_dosificacion', e.target.value)}
-                    placeholder="Observaciones..."
-                    className="w-full px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 focus:outline-none"
-                  />
-                </div>
-              ))}
+            {/* BOTÓN ANCHO: + Agregar Ejercicio al Día EXACTO COMO EN LA IMAGEN */}
+            <div className="p-3 border-t border-slate-800/80 bg-slate-950/40">
+              <button
+                type="button"
+                onClick={() => handleInsertRow(activeBlock.ejercicios.length)}
+                className="w-full py-2.5 px-4 rounded-xl border border-slate-800 hover:border-emerald-500/60 bg-slate-950 hover:bg-slate-900 text-slate-200 hover:text-emerald-400 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition active:scale-98 shadow-sm"
+              >
+                <Plus className="w-4 h-4 text-emerald-400" />
+                <span>Agregar Ejercicio al Día {activeBlockIndex + 1}</span>
+              </button>
             </div>
-          )}
-
-          {/* Add Exercise Button below list */}
-          <div className="pt-2">
-            <button
-              type="button"
-              onClick={() => handleInsertRow(activeBlock.ejercicios.length)}
-              className="w-full py-3 px-4 rounded-xl border border-dashed border-slate-700 bg-slate-900/60 hover:bg-slate-900 text-slate-300 hover:text-emerald-400 text-xs font-bold flex items-center justify-center gap-2 transition active:scale-95 shadow-sm"
-            >
-              <Plus className="w-4 h-4 text-emerald-400" />
-              <span>Agregar Ejercicio al Día {activeBlockIndex + 1}</span>
-            </button>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* MODAL: CONFIGURAR FECHAS DE RUTINA */}
       {showMetaModal && (
@@ -1181,7 +1138,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               </button>
             </div>
 
-            {/* Filter Search Input */}
+            {/* Buscador */}
             <div className="p-4 border-b border-slate-800 bg-slate-950/60 shrink-0">
               <div className="relative">
                 <input
@@ -1194,7 +1151,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               </div>
             </div>
 
-            {/* Exercises List */}
+            {/* Lista de ejercicios */}
             <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
               {filteredLibrary.map((libEx, idx) => (
                 <div
@@ -1321,3 +1278,5 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     </div>
   );
 };
+
+export default RoutineSpreadsheet;

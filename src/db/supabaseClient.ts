@@ -1,32 +1,68 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Alumno, Grupo, Rutina, EvaluacionClinica, SeguimientoDiario } from '../types';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export const isSupabaseConfigured = (): boolean => {
-  return Boolean(
-    supabaseUrl &&
-    supabaseAnonKey &&
-    supabaseUrl !== 'https://your-project-ref.supabase.co' &&
-    !supabaseUrl.includes('placeholder')
-  );
+// Clean quotes or extra spaces if passed in env
+export const cleanEnvValue = (val?: string): string => {
+  if (!val || typeof val !== 'string') return '';
+  return val.trim().replace(/^["']|["']$/g, '').trim();
 };
 
-// Safe Supabase client initialization (never crashes if env vars are missing or offline)
-export const supabase: SupabaseClient | null = isSupabaseConfigured()
-  ? createClient(supabaseUrl!, supabaseAnonKey!, {
+export const cleanUrl = (raw?: string): string => {
+  let url = cleanEnvValue(raw);
+  if (!url) return '';
+  if (!url.startsWith('http://') && !url.startsWith('https://')) {
+    url = `https://${url}`;
+  }
+  return url;
+};
+
+export const isValidHttpUrl = (stringUrl?: string): boolean => {
+  if (!stringUrl) return false;
+  try {
+    const url = new URL(stringUrl);
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      !stringUrl.includes('tu-proyecto') &&
+      !stringUrl.includes('your-project-ref') &&
+      !stringUrl.includes('placeholder')
+    );
+  } catch {
+    return false;
+  }
+};
+
+export const isSupabaseConfigured = (): boolean => {
+  const url = cleanUrl(rawSupabaseUrl);
+  const key = cleanEnvValue(rawSupabaseAnonKey);
+  return Boolean(isValidHttpUrl(url) && key && key.length > 20 && !key.includes('tu-anon-public-key'));
+};
+
+// Safe Supabase client initialization
+export const supabase: SupabaseClient | null = (() => {
+  try {
+    if (!isSupabaseConfigured()) {
+      return null;
+    }
+    const url = cleanUrl(rawSupabaseUrl);
+    const key = cleanEnvValue(rawSupabaseAnonKey);
+    return createClient(url, key, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },
-    })
-  : null;
+    });
+  } catch (err) {
+    console.warn('[Supabase] No se pudo inicializar Supabase, usando IndexedDB local:', err);
+    return null;
+  }
+})();
 
 // ============================================================================
 // SUPABASE SYNC & CRUD HELPERS
-// Used seamlessly by the application when VITE_SUPABASE_URL is configured
 // ============================================================================
 
 export async function fetchStudentsFromSupabase(): Promise<Alumno[] | null> {
@@ -69,6 +105,12 @@ export async function saveStudentToSupabase(alumno: Alumno): Promise<boolean> {
 export async function deleteStudentFromSupabase(alumnoId: string): Promise<boolean> {
   if (!supabase) return false;
   try {
+    // 1. Borrar registros hijos primero para no violar claves foráneas
+    await supabase.from('rutinas').delete().eq('alumno_id', alumnoId);
+    await supabase.from('evaluaciones_clinicas').delete().eq('alumno_id', alumnoId);
+    await supabase.from('seguimiento_diario').delete().eq('alumno_id', alumnoId);
+
+    // 2. Borrar al alumno
     const { error } = await supabase
       .from('alumnos')
       .delete()
@@ -81,6 +123,20 @@ export async function deleteStudentFromSupabase(alumnoId: string): Promise<boole
     return true;
   } catch (err) {
     console.warn('[Supabase] Connection error:', err);
+    return false;
+  }
+}
+
+export async function clearAllStudentsFromSupabase(): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    await supabase.from('rutinas').delete().neq('id', 'placeholder');
+    await supabase.from('evaluaciones_clinicas').delete().neq('id', 'placeholder');
+    await supabase.from('seguimiento_diario').delete().neq('id', 'placeholder');
+    await supabase.from('alumnos').delete().neq('id', 'placeholder');
+    return true;
+  } catch (err) {
+    console.warn('[Supabase] Error clearing all alumnos from cloud:', err);
     return false;
   }
 }
@@ -170,7 +226,7 @@ export async function fetchRoutinesFromSupabase(alumnoId: string): Promise<Rutin
 export async function saveRoutineToSupabase(rutina: Rutina): Promise<boolean> {
   if (!supabase) return false;
   try {
-    // 1. Save Rutina header
+    // 1. Guardar cabecera de rutina
     const { error: rutError } = await supabase
       .from('rutinas')
       .upsert({
@@ -187,7 +243,7 @@ export async function saveRoutineToSupabase(rutina: Rutina): Promise<boolean> {
 
     if (rutError) throw rutError;
 
-    // 2. Save Bloques & Ejercicios
+    // 2. Guardar bloques y ejercicios
     for (const bloque of rutina.bloques) {
       const { error: blkError } = await supabase
         .from('bloques_rutina')

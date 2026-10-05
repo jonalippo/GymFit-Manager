@@ -3,6 +3,7 @@ import { Alumno, Grupo, ZonaDolor, DecisionTerapeutica } from '../types';
 import { getCuotaInfo, computeFullMonthExpiration } from '../utils/cuotaUtils';
 import {
   Search,
+  Users,
   UserPlus,
   AlertTriangle,
   FolderPlus,
@@ -47,6 +48,7 @@ interface StudentListProps {
   onEditStudent: (alumno: Alumno) => Promise<void>;
   onDeleteStudent: (alumnoId: string) => Promise<void>;
   onAddGrupo: (newGrupo: Omit<Grupo, 'id'>) => Promise<void>;
+  onClearAllStudents?: () => Promise<void>;
   onNavigateToGroups?: () => void;
 }
 
@@ -62,6 +64,7 @@ export const StudentList: React.FC<StudentListProps> = ({
   onEditStudent,
   onDeleteStudent,
   onAddGrupo,
+  onClearAllStudents,
   onNavigateToGroups,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -377,13 +380,29 @@ export const StudentList: React.FC<StudentListProps> = ({
             <UserPlus className="w-3.5 h-3.5" />
             <span>Nuevo Alumno</span>
           </button>
-          <button
-            onClick={() => setShowGroupModal(true)}
-            className="w-full py-1 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium flex items-center justify-center gap-1 transition"
-          >
-            <FolderPlus className="w-3 h-3 text-slate-400" />
-            <span>Nuevo Grupo</span>
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setShowGroupModal(true)}
+              className="flex-1 py-1 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-medium flex items-center justify-center gap-1 transition"
+            >
+              <FolderPlus className="w-3 h-3 text-slate-400" />
+              <span>Nuevo Grupo</span>
+            </button>
+            {onClearAllStudents && alumnos.length > 0 && (
+              <button
+                onClick={() => {
+                  if (window.confirm('¿Deseas eliminar todos los alumnos de prueba para empezar de cero con tus alumnos reales?')) {
+                    onClearAllStudents();
+                  }
+                }}
+                className="py-1 px-2 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-900/50 text-[10px] font-semibold flex items-center justify-center gap-1 transition shrink-0"
+                title="Vaciar alumnos de prueba y empezar de cero"
+              >
+                <Trash2 className="w-3 h-3 text-rose-400" />
+                <span>Vaciar Demo</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -622,9 +641,30 @@ export const StudentList: React.FC<StudentListProps> = ({
       </div>
 
       {filteredAlumnos.length === 0 && (
-        <div className="text-center py-12 border border-dashed border-slate-800 rounded-2xl p-6">
-          <p className="text-base text-slate-300 font-semibold">No se encontraron alumnos con ese criterio</p>
-          <p className="text-xs text-slate-500 mt-1">Prueba cambiando el término de búsqueda o agregando un nuevo alumno.</p>
+        <div className="text-center py-16 border border-dashed border-slate-800 rounded-3xl p-8 bg-slate-900/30 max-w-xl mx-auto my-6">
+          <div className="w-14 h-14 mx-auto rounded-2xl bg-emerald-950/60 border border-emerald-500/30 flex items-center justify-center text-emerald-400 mb-4 shadow-lg shadow-emerald-950/50">
+            <Users className="w-7 h-7" />
+          </div>
+          <h3 className="text-lg text-white font-bold tracking-tight">
+            {alumnos.length === 0 ? '¡Tu espacio está listo y limpio!' : 'No se encontraron alumnos'}
+          </h3>
+          <p className="text-xs sm:text-sm text-slate-400 mt-2 max-w-md mx-auto leading-relaxed">
+            {alumnos.length === 0
+              ? 'La lista de alumnos está vacía. Ahora puedes registrar a los alumnos reales de tu gimnasio con sus datos clínicos y planificar sus rutinas.'
+              : 'Prueba cambiando el término de búsqueda o seleccionando otro grupo.'}
+          </p>
+          <div className="mt-5">
+            <button
+              onClick={() => {
+                resetForm();
+                setShowAddModal(true);
+              }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs sm:text-sm font-bold shadow-lg shadow-emerald-950/50 transition active:scale-95"
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>Registrar Primer Alumno</span>
+            </button>
+          </div>
         </div>
       )}
 

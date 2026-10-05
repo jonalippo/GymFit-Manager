@@ -9,6 +9,7 @@ import {
   getEvaluacionClinica,
   saveAlumno,
   deleteAlumno,
+  clearAllLocalAlumnos,
   saveGrupo,
   deleteGrupo,
   saveRutina,
@@ -31,6 +32,7 @@ import {
   fetchStudentsFromSupabase,
   saveStudentToSupabase,
   deleteStudentFromSupabase,
+  clearAllStudentsFromSupabase,
   fetchGroupsFromSupabase,
   saveGroupToSupabase,
   deleteGroupFromSupabase,
@@ -83,11 +85,19 @@ export default function App() {
   const [currentRutinas, setCurrentRutinas] = useState<Rutina[]>([]);
   const [currentEvaluacion, setCurrentEvaluacion] = useState<EvaluacionClinica | null>(null);
 
+  // Caché de rutinas por alumno para cambio instantáneo de pestañas sin recargar pantalla
+  const [routinesByStudent, setRoutinesByStudent] = useState<Record<string, Rutina[]>>({});
+  // Memoria del Día/Bloque (Día 1, Día 2, etc.) y rutina activa para cada alumno
+  const [studentActiveDays, setStudentActiveDays] = useState<Record<string, string>>({});
+  const [studentActiveRoutines, setStudentActiveRoutines] = useState<Record<string, string>>({});
+  const isSavingRef = React.useRef(false);
+
   // Modals
   const [isDailyLogOpen, setIsDailyLogOpen] = useState(false);
   const [isEvalModalOpen, setIsEvalModalOpen] = useState(false);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [dailyLogStudent, setDailyLogStudent] = useState<Alumno | null>(null);
+  const initialCloudSyncDone = React.useRef(false);
 
   // Initialize DB and load data
   const loadData = useCallback(async () => {
@@ -99,32 +109,51 @@ export default function App() {
       setAlumnos(allAlumnos);
       setGrupos(allGrupos);
 
-      // Cloud sync with Supabase if credentials are provided in .env
-      if (isSupabaseConfigured()) {
-        fetchStudentsFromSupabase().then((cloudAlumnos) => {
+      // Cloud sync con Supabase ÚNICAMENTE en el arranque inicial para no resucitar alumnos borrados
+      if (isSupabaseConfigured() && !initialCloudSyncDone.current) {
+        initialCloudSyncDone.current = true;
+        fetchStudentsFromSupabase().then(async (cloudAlumnos) => {
           if (cloudAlumnos && cloudAlumnos.length > 0) {
             setAlumnos(cloudAlumnos);
-            cloudAlumnos.forEach((a) => saveAlumno(a));
+            for (const a of cloudAlumnos) {
+              await saveAlumno(a);
+            }
           }
         }).catch((e) => console.warn('[Supabase Sync]', e));
 
-        fetchGroupsFromSupabase().then((cloudGrupos) => {
+        fetchGroupsFromSupabase().then(async (cloudGrupos) => {
           if (cloudGrupos && cloudGrupos.length > 0) {
             setGrupos(cloudGrupos);
-            cloudGrupos.forEach((g) => saveGrupo(g));
+            for (const g of cloudGrupos) {
+              await saveGrupo(g);
+            }
           }
         }).catch((e) => console.warn('[Supabase Sync]', e));
       }
+
+      // Pre-cargar rutinas en memoria caché para evitar pantallas en blanco al navegar entre alumnos
+      const routinesCacheMap: Record<string, Rutina[]> = {};
+      await Promise.all(
+        allAlumnos.map(async (a) => {
+          try {
+            const ruts = await getRutinasByAlumno(a.id);
+            if (ruts.length > 0) {
+              routinesCacheMap[a.id] = ruts;
+            }
+          } catch (e) {
+            console.warn('[Cache routine]', e);
+          }
+        })
+      );
+      setRoutinesByStudent((prev) => ({ ...prev, ...routinesCacheMap }));
 
       // Default selected student if none
       if (!selectedStudentId && allAlumnos.length > 0) {
         const first = allAlumnos[0];
         setSelectedStudentId(first.id);
         setActiveDockStudents(allAlumnos.slice(0, 4)); // Pre-pin 4 athletes to gym floor dock
-        const [ruts, ev] = await Promise.all([
-          getRutinasByAlumno(first.id),
-          getEvaluacionClinica(first.id)
-        ]);
+        const ruts = routinesCacheMap[first.id] || (await getRutinasByAlumno(first.id));
+        const ev = await getEvaluacionClinica(first.id);
         setCurrentRutinas(ruts);
         setCurrentEvaluacion(ev);
       } else if (selectedStudentId) {
@@ -132,10 +161,8 @@ export default function App() {
         setActiveDockStudents((prev) =>
           prev.map((docAlm) => allAlumnos.find((a) => a.id === docAlm.id) || docAlm)
         );
-        const [ruts, ev] = await Promise.all([
-          getRutinasByAlumno(selectedStudentId),
-          getEvaluacionClinica(selectedStudentId)
-        ]);
+        const ruts = routinesCacheMap[selectedStudentId] || (await getRutinasByAlumno(selectedStudentId));
+        const ev = await getEvaluacionClinica(selectedStudentId);
         setCurrentRutinas(ruts);
         setCurrentEvaluacion(ev);
       }
@@ -149,7 +176,10 @@ export default function App() {
   useEffect(() => {
     loadData();
     const unsubscribe = subscribeToDBChanges(() => {
-      loadData();
+      // Si el guardado provino de una edición local, no recargamos todo para evitar parpadeos
+      if (!isSavingRef.current) {
+        loadData();
+      }
     });
     return () => unsubscribe();
   }, [loadData]);
@@ -162,9 +192,19 @@ export default function App() {
     Promise.all([
       getRutinasByAlumno(selectedStudentId),
       getEvaluacionClinica(selectedStudentId)
-    ]).then(([ruts, ev]) => {
+    ]).then(async ([ruts, ev]) => {
       if (isMounted) {
-        setCurrentRutinas(ruts);
+        if (ruts.length === 0) {
+          // Si el alumno no tiene ninguna rutina propia, crearle una automáticamente única para él
+          const newRoutine = await handleCreateNewRoutine(selectedStudentId);
+          if (isMounted) {
+            setCurrentRutinas([newRoutine]);
+            setRoutinesByStudent((prev) => ({ ...prev, [selectedStudentId]: [newRoutine] }));
+          }
+        } else {
+          setCurrentRutinas(ruts);
+          setRoutinesByStudent((prev) => ({ ...prev, [selectedStudentId]: ruts }));
+        }
         setCurrentEvaluacion(ev);
       }
     });
@@ -192,10 +232,17 @@ export default function App() {
     setSelectedStudentId(alumno.id);
     setActiveView(targetView);
 
-    // If not in dock, add it (if < 8)
+    // Cargar inmediatamente desde la caché en memoria para cambio instantáneo sin parpadeos
+    if (routinesByStudent[alumno.id] && routinesByStudent[alumno.id].length > 0) {
+      setCurrentRutinas(routinesByStudent[alumno.id]);
+    }
+
+    // Si no está en el dock, agregarlo (máximo 8)
     if (!activeDockStudents.some((a) => a.id === alumno.id)) {
       if (activeDockStudents.length < 8) {
         setActiveDockStudents((prev) => [...prev, alumno]);
+      } else {
+        setActiveDockStudents((prev) => [...prev.slice(1), alumno]);
       }
     }
   };
@@ -206,6 +253,8 @@ export default function App() {
     } else {
       if (activeDockStudents.length < 8) {
         setActiveDockStudents((prev) => [...prev, alumno]);
+      } else {
+        setActiveDockStudents((prev) => [...prev.slice(1), alumno]);
       }
     }
   };
@@ -216,34 +265,35 @@ export default function App() {
   };
 
   const handleCreateNewRoutine = async (alumnoId: string): Promise<Rutina> => {
-    const routineNum = currentRutinas.length + 1;
-    const newRoutineId = 'rut-' + Date.now();
+    const studentRoutines = await getRutinasByAlumno(alumnoId);
+    const routineNum = studentRoutines.length + 1;
+    const newRoutineId = 'rut-' + alumnoId + '-' + Date.now();
     const newRoutine: Rutina = {
       id: newRoutineId,
       alumno_id: alumnoId,
-      nombre_rutina: `Rutina ${routineNum}: Nueva Fase`,
+      nombre_rutina: `Rutina ${routineNum}: Fase Inicial`,
       fecha_inicio: new Date().toISOString().split('T')[0],
       fecha_cambio: new Date(Date.now() + 28 * 86400000).toISOString().split('T')[0],
       activa: true,
       orden: routineNum,
-      notas_generales: 'Cuidar progresión de carga y técnica.',
+      notas_generales: 'Planificación personalizada.',
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       bloques: [
         {
-          id: 'blk-' + Date.now(),
+          id: 'blk-' + alumnoId + '-' + Date.now(),
           rutina_id: newRoutineId,
           nombre_sub_pestana: 'Día 1: Principal',
           orden: 1,
           ejercicios: [
             {
-              id: 'ej-' + Date.now(),
-              bloque_id: 'blk-' + Date.now(),
+              id: 'ej-' + Date.now() + '-' + Math.random().toString(36).substr(2, 4),
+              bloque_id: 'blk-' + alumnoId + '-' + Date.now(),
               orden: 1,
               ejercicio: 'Sentadilla Goblet con Mancuerna',
               series: '3',
               repeticiones: '10',
-              carga: '16 kg',
+              carga: '14 kg',
               pausa: '60s',
               observaciones_dosificacion: 'Mantener tronco vertical y control excéntrico.'
             }
@@ -253,24 +303,52 @@ export default function App() {
     };
 
     await saveRutina(newRoutine);
-    setCurrentRutinas((prev) => [...prev, newRoutine]);
+    if (isSupabaseConfigured()) {
+      saveRoutineToSupabase(newRoutine).catch((err) => console.warn('[Supabase]', err));
+    }
+    setRoutinesByStudent((prev) => {
+      const list = prev[alumnoId] || [];
+      return { ...prev, [alumnoId]: [...list.filter((r) => r.id !== newRoutine.id), newRoutine] };
+    });
+    setCurrentRutinas((prev) => {
+      const filtered = prev.filter((r) => r.id !== newRoutine.id);
+      return [...filtered, newRoutine];
+    });
     return newRoutine;
   };
 
   const handleSaveRoutine = async (rutina: Rutina) => {
-    await saveRutina(rutina);
-    if (isSupabaseConfigured()) {
-      saveRoutineToSupabase(rutina).catch((err) => console.warn('[Supabase]', err));
-    }
-    setCurrentRutinas((prev) => {
-      const idx = prev.findIndex((r) => r.id === rutina.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = rutina;
-        return copy;
+    isSavingRef.current = true;
+    try {
+      // 1. Actualización inmediata en memoria para cero lag y cero parpadeo
+      setRoutinesByStudent((prev) => {
+        const list = prev[rutina.alumno_id] || [];
+        const idx = list.findIndex((r) => r.id === rutina.id);
+        const updated = idx >= 0 ? list.map((r) => (r.id === rutina.id ? rutina : r)) : [...list, rutina];
+        return { ...prev, [rutina.alumno_id]: updated };
+      });
+      setCurrentRutinas((prev) => {
+        const idx = prev.findIndex((r) => r.id === rutina.id);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = rutina;
+          return copy;
+        }
+        return [...prev, rutina];
+      });
+
+      // 2. Persistir en base de datos local
+      await saveRutina(rutina);
+
+      // 3. Persistir en la nube
+      if (isSupabaseConfigured()) {
+        saveRoutineToSupabase(rutina).catch((err) => console.warn('[Supabase]', err));
       }
-      return [...prev, rutina];
-    });
+    } finally {
+      setTimeout(() => {
+        isSavingRef.current = false;
+      }, 500);
+    }
   };
 
   const handleDeleteRoutine = async (routineId: string) => {
@@ -278,6 +356,13 @@ export default function App() {
     if (isSupabaseConfigured()) {
       deleteRoutineFromSupabase(routineId).catch((err) => console.warn('[Supabase]', err));
     }
+    setRoutinesByStudent((prev) => {
+      const copy: Record<string, Rutina[]> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        copy[k] = v.filter((r) => r.id !== routineId);
+      }
+      return copy;
+    });
     setCurrentRutinas((prev) => prev.filter((r) => r.id !== routineId));
   };
 
@@ -297,7 +382,13 @@ export default function App() {
     if (isSupabaseConfigured()) {
       saveStudentToSupabase(created).catch((err) => console.warn('[Supabase]', err));
     }
+    // Crear rutina dedicada para este nuevo alumno
+    const newRoutine = await handleCreateNewRoutine(created.id);
+    setRoutinesByStudent((prev) => ({ ...prev, [created.id]: [newRoutine] }));
+    setCurrentRutinas([newRoutine]);
+    setAlumnos((prev) => [...prev, created]);
     setSelectedStudentId(created.id);
+    setActiveDockStudents((prev) => [created, ...prev.slice(0, 7)]);
   };
 
   const handleEditStudent = async (updatedAlumno: Alumno) => {
@@ -309,16 +400,59 @@ export default function App() {
   };
 
   const handleDeleteStudent = async (studentId: string) => {
-    await deleteAlumno(studentId);
-    if (isSupabaseConfigured()) {
-      deleteStudentFromSupabase(studentId).catch((err) => console.warn('[Supabase]', err));
-    }
+    // 1. Quitar al alumno inmediatamente de la pantalla y caché
+    setAlumnos((prev) => prev.filter((a) => a.id !== studentId));
     setActiveDockStudents((prev) => prev.filter((a) => a.id !== studentId));
+    setRoutinesByStudent((prev) => {
+      const copy = { ...prev };
+      delete copy[studentId];
+      return copy;
+    });
+    setStudentActiveDays((prev) => {
+      const copy = { ...prev };
+      delete copy[studentId];
+      return copy;
+    });
+    setStudentActiveRoutines((prev) => {
+      const copy = { ...prev };
+      delete copy[studentId];
+      return copy;
+    });
+
     if (selectedStudentId === studentId) {
-      const remaining = alumnos.filter((a) => a.id !== studentId);
-      setSelectedStudentId(remaining[0]?.id || null);
+      setSelectedStudentId((prev) => {
+        const remaining = alumnos.filter((a) => a.id !== studentId);
+        return remaining[0]?.id || null;
+      });
     }
-    await loadData();
+
+    // 2. Esperar el borrado en la nube PRIMERO para que no rebote
+    if (isSupabaseConfigured()) {
+      await deleteStudentFromSupabase(studentId);
+    }
+
+    // 3. Borrar de la base de datos local
+    await deleteAlumno(studentId);
+  };
+
+  const handleClearAllStudents = async () => {
+    // 1. Limpiar pantalla de inmediato y caché
+    setAlumnos([]);
+    setActiveDockStudents([]);
+    setSelectedStudentId(null);
+    setCurrentRutinas([]);
+    setCurrentEvaluacion(null);
+    setRoutinesByStudent({});
+    setStudentActiveDays({});
+    setStudentActiveRoutines({});
+
+    // 2. Vaciar en la nube
+    if (isSupabaseConfigured()) {
+      await clearAllStudentsFromSupabase();
+    }
+
+    // 3. Vaciar base local
+    await clearAllLocalAlumnos();
   };
 
   const handleAddGrupo = async (newGrupo: Omit<Grupo, 'id'>) => {
@@ -459,6 +593,7 @@ export default function App() {
             onEditStudent={handleEditStudent}
             onDeleteStudent={handleDeleteStudent}
             onAddGrupo={handleAddGrupo}
+            onClearAllStudents={handleClearAllStudents}
             onNavigateToGroups={() => setActiveView('grupos')}
           />
         )}
@@ -477,20 +612,68 @@ export default function App() {
           />
         )}
 
-        {/* View 3: Rutina Interactive Spreadsheet */}
-        {activeView === 'rutina' && selectedStudent && (
-          <RoutineSpreadsheet
-            alumno={selectedStudent}
-            rutinas={currentRutinas}
-            evaluacion={currentEvaluacion}
-            allAlumnos={alumnos}
-            onSaveRoutine={handleSaveRoutine}
-            onCreateNewRoutine={handleCreateNewRoutine}
-            onDeleteRoutine={handleDeleteRoutine}
-            onBackToAlumnos={() => setActiveView('alumnos')}
-            onSwitchStudent={(alm) => handleSelectStudent(alm, 'rutina')}
-            onOpenEvaluation={() => setActiveView('evaluacion')}
-          />
+        {/* View 3: Rutina Interactive Spreadsheet - Keep-alive para cambio instantáneo sin recargar ni perder el día */}
+        {activeView === 'rutina' && (
+          <div>
+            {activeDockStudents.map((dockAlm) => {
+              const isSelected = dockAlm.id === selectedStudentId;
+              const studentRuts =
+                routinesByStudent[dockAlm.id] ||
+                (isSelected ? currentRutinas.filter((r) => r.alumno_id === dockAlm.id) : []);
+
+              return (
+                <div key={dockAlm.id} className={isSelected ? 'block' : 'hidden'}>
+                  <RoutineSpreadsheet
+                    alumno={dockAlm}
+                    rutinas={studentRuts}
+                    evaluacion={isSelected ? currentEvaluacion : null}
+                    allAlumnos={alumnos}
+                    savedActiveBlockId={studentActiveDays[dockAlm.id]}
+                    onActiveBlockChange={(blockId) =>
+                      setStudentActiveDays((prev) => ({ ...prev, [dockAlm.id]: blockId }))
+                    }
+                    savedActiveRoutineId={studentActiveRoutines[dockAlm.id]}
+                    onActiveRoutineChange={(routineId) =>
+                      setStudentActiveRoutines((prev) => ({ ...prev, [dockAlm.id]: routineId }))
+                    }
+                    onSaveRoutine={handleSaveRoutine}
+                    onCreateNewRoutine={handleCreateNewRoutine}
+                    onDeleteRoutine={handleDeleteRoutine}
+                    onBackToAlumnos={() => setActiveView('alumnos')}
+                    onSwitchStudent={(alm) => handleSelectStudent(alm, 'rutina')}
+                    onOpenEvaluation={() => setActiveView('evaluacion')}
+                  />
+                </div>
+              );
+            })}
+
+            {/* Si el alumno seleccionado aún no estuviera fijado en el dock */}
+            {selectedStudent && !activeDockStudents.some((a) => a.id === selectedStudent.id) && (
+              <RoutineSpreadsheet
+                alumno={selectedStudent}
+                rutinas={
+                  routinesByStudent[selectedStudent.id] ||
+                  currentRutinas.filter((r) => r.alumno_id === selectedStudent.id)
+                }
+                evaluacion={currentEvaluacion}
+                allAlumnos={alumnos}
+                savedActiveBlockId={studentActiveDays[selectedStudent.id]}
+                onActiveBlockChange={(blockId) =>
+                  setStudentActiveDays((prev) => ({ ...prev, [selectedStudent.id]: blockId }))
+                }
+                savedActiveRoutineId={studentActiveRoutines[selectedStudent.id]}
+                onActiveRoutineChange={(routineId) =>
+                  setStudentActiveRoutines((prev) => ({ ...prev, [selectedStudent.id]: routineId }))
+                }
+                onSaveRoutine={handleSaveRoutine}
+                onCreateNewRoutine={handleCreateNewRoutine}
+                onDeleteRoutine={handleDeleteRoutine}
+                onBackToAlumnos={() => setActiveView('alumnos')}
+                onSwitchStudent={(alm) => handleSelectStudent(alm, 'rutina')}
+                onOpenEvaluation={() => setActiveView('evaluacion')}
+              />
+            )}
+          </div>
         )}
 
         {/* View 4: Evaluación Clínica "El Iceberg" */}
@@ -636,8 +819,7 @@ export default function App() {
         activeStudents={activeDockStudents}
         selectedStudentId={selectedStudentId}
         onSelectStudent={(alm) => {
-          setSelectedStudentId(alm.id);
-          setActiveView('rutina');
+          handleSelectStudent(alm, 'rutina');
         }}
         onRemoveFromDock={handleRemoveFromDock}
         onOpenStudentDirectory={() => setActiveView('alumnos')}
