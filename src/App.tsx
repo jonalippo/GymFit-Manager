@@ -50,7 +50,8 @@ import {
   ChevronRight,
   Brain,
   Layers,
-  LogOut
+  LogOut,
+  X
 } from 'lucide-react';
 
 interface AuthUser {
@@ -100,6 +101,19 @@ export default function App() {
   const [dailyLogStudent, setDailyLogStudent] = useState<Alumno | null>(null);
   const initialCloudSyncDone = React.useRef(false);
 
+  // Real-time toast feedback
+  const [toastMessage, setToastMessage] = useState<{
+    type: 'success' | 'error' | 'warning' | 'info';
+    text: string;
+  } | null>(null);
+
+  const showToast = useCallback((type: 'success' | 'error' | 'warning' | 'info', text: string) => {
+    setToastMessage({ type, text });
+    setTimeout(() => {
+      setToastMessage((prev) => (prev?.text === text ? null : prev));
+    }, 4500);
+  }, []);
+
   // Initialize DB and load data
   const loadData = useCallback(async () => {
     try {
@@ -110,7 +124,7 @@ export default function App() {
       setAlumnos(allAlumnos);
       setGrupos(allGrupos);
 
-      // Cloud sync con Supabase en el arranque inicial
+      // Cloud sync con Supabase ÚNICAMENTE en el arranque inicial para no resucitar alumnos borrados
       if (isSupabaseConfigured() && !initialCloudSyncDone.current) {
         initialCloudSyncDone.current = true;
         try {
@@ -161,13 +175,12 @@ export default function App() {
       if (!selectedStudentId && allAlumnos.length > 0) {
         const first = allAlumnos[0];
         setSelectedStudentId(first.id);
-        setActiveDockStudents(allAlumnos.slice(0, 4)); // Pre-pin 4 athletes to gym floor dock
+        setActiveDockStudents(allAlumnos.slice(0, 4));
         const ruts = routinesCacheMap[first.id] || (await getRutinasByAlumno(first.id));
         const ev = await getEvaluacionClinica(first.id);
         setCurrentRutinas(ruts);
         setCurrentEvaluacion(ev);
       } else if (selectedStudentId) {
-        // Refresh active dock students with updated records
         setActiveDockStudents((prev) =>
           prev.map((docAlm) => allAlumnos.find((a) => a.id === docAlm.id) || docAlm)
         );
@@ -186,7 +199,6 @@ export default function App() {
   useEffect(() => {
     loadData();
     const unsubscribe = subscribeToDBChanges(() => {
-      // Si el guardado provino de una edición local, no recargamos todo para evitar parpadeos
       if (!isSavingRef.current) {
         loadData();
       }
@@ -205,7 +217,6 @@ export default function App() {
     ]).then(async ([ruts, ev]) => {
       if (isMounted) {
         let finalRuts = ruts;
-        // Si no hay rutinas en local, verificar en Supabase antes de crear una en blanco
         if (finalRuts.length === 0 && isSupabaseConfigured()) {
           const cloudRuts = await fetchRoutinesFromSupabase(selectedStudentId);
           if (cloudRuts && cloudRuts.length > 0) {
@@ -216,7 +227,6 @@ export default function App() {
           }
         }
         if (finalRuts.length === 0) {
-          // Si el alumno no tiene ninguna rutina propia, crearle una automáticamente única para él
           const newRoutine = await handleCreateNewRoutine(selectedStudentId);
           if (isMounted) {
             setCurrentRutinas([newRoutine]);
@@ -251,12 +261,10 @@ export default function App() {
     setSelectedStudentId(alumno.id);
     setActiveView(targetView);
 
-    // Cargar inmediatamente desde la caché en memoria para cambio instantáneo sin parpadeos
     if (routinesByStudent[alumno.id] && routinesByStudent[alumno.id].length > 0) {
       setCurrentRutinas(routinesByStudent[alumno.id]);
     }
 
-    // Si no está en el dock, agregarlo (máximo 8)
     if (!activeDockStudents.some((a) => a.id === alumno.id)) {
       if (activeDockStudents.length < 8) {
         setActiveDockStudents((prev) => [...prev, alumno]);
@@ -339,7 +347,6 @@ export default function App() {
   const handleSaveRoutine = async (rutina: Rutina) => {
     isSavingRef.current = true;
     try {
-      // 1. Actualización inmediata en memoria para cero lag y cero parpadeo
       setRoutinesByStudent((prev) => {
         const list = prev[rutina.alumno_id] || [];
         const idx = list.findIndex((r) => r.id === rutina.id);
@@ -356,10 +363,10 @@ export default function App() {
         return [...prev, rutina];
       });
 
-      // 2. Persistir en base de datos local
+      // Guardar local
       await saveRutina(rutina);
 
-      // 3. Persistir en la nube
+      // Guardar en Supabase
       if (isSupabaseConfigured()) {
         saveRoutineToSupabase(rutina).catch((err) => console.warn('[Supabase]', err));
       }
@@ -398,9 +405,19 @@ export default function App() {
       updated_at: new Date().toISOString(),
     };
     await saveAlumno(created);
+
+    // Guardar primero en Supabase para satisfacer la clave foránea en rutinas
     if (isSupabaseConfigured()) {
-      saveStudentToSupabase(created).catch((err) => console.warn('[Supabase]', err));
+      const res = await saveStudentToSupabase(created);
+      if (res.success) {
+        showToast('success', `✓ Alumno "${created.nombre} ${created.apellido}" guardado y sincronizado en Supabase`);
+      } else {
+        showToast('error', `⚠️ Guardado en este dispositivo, pero falló en Supabase: ${res.error || 'Error de red'}`);
+      }
+    } else {
+      showToast('warning', `ℹ️ Alumno guardado solo localmente. Supabase no está conectado.`);
     }
+
     // Crear rutina dedicada para este nuevo alumno
     const newRoutine = await handleCreateNewRoutine(created.id);
     setRoutinesByStudent((prev) => ({ ...prev, [created.id]: [newRoutine] }));
@@ -413,13 +430,17 @@ export default function App() {
   const handleEditStudent = async (updatedAlumno: Alumno) => {
     await saveAlumno(updatedAlumno);
     if (isSupabaseConfigured()) {
-      saveStudentToSupabase(updatedAlumno).catch((err) => console.warn('[Supabase]', err));
+      const res = await saveStudentToSupabase(updatedAlumno);
+      if (res.success) {
+        showToast('success', `✓ Alumno "${updatedAlumno.nombre}" actualizado en Supabase`);
+      } else {
+        showToast('error', `⚠️ Guardado localmente, pero error en Supabase: ${res.error || 'Error'}`);
+      }
     }
     await loadData();
   };
 
   const handleDeleteStudent = async (studentId: string) => {
-    // 1. Quitar al alumno inmediatamente de la pantalla y caché
     setAlumnos((prev) => prev.filter((a) => a.id !== studentId));
     setActiveDockStudents((prev) => prev.filter((a) => a.id !== studentId));
     setRoutinesByStudent((prev) => {
@@ -445,17 +466,14 @@ export default function App() {
       });
     }
 
-    // 2. Esperar el borrado en la nube PRIMERO para que no rebote
     if (isSupabaseConfigured()) {
       await deleteStudentFromSupabase(studentId);
     }
 
-    // 3. Borrar de la base de datos local
     await deleteAlumno(studentId);
   };
 
   const handleClearAllStudents = async () => {
-    // 1. Limpiar pantalla de inmediato y caché
     setAlumnos([]);
     setActiveDockStudents([]);
     setSelectedStudentId(null);
@@ -465,12 +483,10 @@ export default function App() {
     setStudentActiveDays({});
     setStudentActiveRoutines({});
 
-    // 2. Vaciar en la nube
     if (isSupabaseConfigured()) {
       await clearAllStudentsFromSupabase();
     }
 
-    // 3. Vaciar base local
     await clearAllLocalAlumnos();
   };
 
@@ -526,7 +542,6 @@ export default function App() {
     );
   }
 
-  // If user is not authenticated, show the Auth Login / Register Screen!
   if (!currentUser) {
     return <AuthScreen onLogin={handleLogin} defaultEmail="jonalippo@gmail.com" />;
   }
@@ -542,7 +557,7 @@ export default function App() {
         onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
       />
 
-      {/* Main Viewport Container (Zero horizontal scroll) */}
+      {/* Main Viewport Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 pt-5 pb-24 overflow-x-hidden">
         {/* Mobile user status and logout bar */}
         <div className="md:hidden flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs mb-3 shadow-sm">
@@ -565,7 +580,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* Mobile quick tabs (Only Alumnos, Grupos, and Rutina if active) */}
+        {/* Mobile quick tabs */}
         <div className="md:hidden flex items-center gap-1.5 mb-4 p-1 rounded-2xl bg-slate-900 border border-slate-800 text-xs">
           <button
             onClick={() => setActiveView('alumnos')}
@@ -595,7 +610,7 @@ export default function App() {
           )}
         </div>
 
-        {/* View 1: Alumnos Directory & Gym Floor Hub */}
+        {/* View 1: Alumnos Directory */}
         {activeView === 'alumnos' && (
           <StudentList
             alumnos={alumnos}
@@ -617,7 +632,7 @@ export default function App() {
           />
         )}
 
-        {/* View 2: Grupos & Turnos Management */}
+        {/* View 2: Grupos Management */}
         {activeView === 'grupos' && (
           <GroupManager
             grupos={grupos}
@@ -631,7 +646,7 @@ export default function App() {
           />
         )}
 
-        {/* View 3: Rutina Interactive Spreadsheet - Keep-alive para cambio instantáneo sin recargar ni perder el día */}
+        {/* View 3: Rutina Spreadsheet */}
         {activeView === 'rutina' && (
           <div>
             {activeDockStudents.map((dockAlm) => {
@@ -666,7 +681,6 @@ export default function App() {
               );
             })}
 
-            {/* Si el alumno seleccionado aún no estuviera fijado en el dock */}
             {selectedStudent && !activeDockStudents.some((a) => a.id === selectedStudent.id) && (
               <RoutineSpreadsheet
                 alumno={selectedStudent}
@@ -695,10 +709,9 @@ export default function App() {
           </div>
         )}
 
-        {/* View 4: Evaluación Clínica "El Iceberg" */}
+        {/* View 4: Evaluación Clínica */}
         {activeView === 'evaluacion' && selectedStudent && (
           <div className="space-y-4 pb-24">
-            {/* Top Action Bar with Back Button */}
             <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/60 border border-slate-800/80 px-3.5 py-2.5 rounded-2xl">
               <div className="flex items-center gap-3">
                 <button
@@ -710,7 +723,6 @@ export default function App() {
                   <span>Volver a Alumnos</span>
                 </button>
 
-                {/* Breadcrumbs */}
                 <div className="hidden sm:flex items-center gap-2 text-xs text-slate-400">
                   <button onClick={() => setActiveView('alumnos')} className="hover:text-slate-200 transition">
                     Alumnos
@@ -724,7 +736,6 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Quick Actions */}
               <div className="flex items-center gap-2">
                 {alumnos.length > 1 && (
                   <select
@@ -753,7 +764,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* Header Card */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-slate-900 border border-slate-800 shadow-xl">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 rounded-2xl bg-slate-800 text-emerald-400 font-bold text-lg flex items-center justify-center border border-emerald-500/30">
@@ -781,7 +791,6 @@ export default function App() {
 
             {currentEvaluacion ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
-                {/* Pilar 1 & 5 */}
                 <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3 shadow-md">
                   <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                     <span className="font-bold text-emerald-400 text-xs uppercase tracking-wider flex items-center gap-1.5">
@@ -799,7 +808,6 @@ export default function App() {
                   <p><strong className="text-slate-300">Justificación:</strong> {currentEvaluacion.justificacion_clinica}</p>
                 </div>
 
-                {/* Pilar 2, 3, 4 */}
                 <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3 shadow-md">
                   <div className="flex items-center justify-between pb-2 border-b border-slate-800">
                     <span className="font-bold text-blue-400 text-xs uppercase tracking-wider flex items-center gap-1.5">
@@ -844,7 +852,7 @@ export default function App() {
         onOpenStudentDirectory={() => setActiveView('alumnos')}
       />
 
-      {/* Daily Session Log Modal (RPE & EVA) */}
+      {/* Daily Session Log Modal */}
       {dailyLogStudent && (
         <DailyTrackingModal
           alumno={dailyLogStudent}
@@ -875,6 +883,31 @@ export default function App() {
         isOpen={isSupabaseModalOpen}
         onClose={() => setIsSupabaseModalOpen(false)}
       />
+
+      {/* Real-time sync feedback toast */}
+      {toastMessage && (
+        <div className="fixed top-14 right-3 sm:right-6 z-50 max-w-sm sm:max-w-md animate-in fade-in slide-in-from-top-2 duration-200">
+          <div
+            className={`px-4 py-3 rounded-2xl shadow-2xl border text-xs flex items-center gap-2.5 backdrop-blur-md ${
+              toastMessage.type === 'success'
+                ? 'bg-emerald-950/95 border-emerald-500/70 text-emerald-100 shadow-emerald-950/60'
+                : toastMessage.type === 'error'
+                ? 'bg-rose-950/95 border-rose-500/70 text-rose-100 shadow-rose-950/60'
+                : toastMessage.type === 'warning'
+                ? 'bg-amber-950/95 border-amber-500/70 text-amber-100 shadow-amber-950/60'
+                : 'bg-slate-900/95 border-slate-700 text-slate-100'
+            }`}
+          >
+            <div className="flex-1 font-medium leading-snug">{toastMessage.text}</div>
+            <button
+              onClick={() => setToastMessage(null)}
+              className="p-1 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white shrink-0"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,24 +1,25 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Alumno, Grupo, Rutina, EvaluacionClinica, SeguimientoDiario } from '../types';
+import { Alumno, Grupo, Rutina, EvaluacionClinica, SeguimientoDiario, BloqueRutina, EjercicioRutina } from '../types';
 
-const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// ============================================================================
+// CREDENTIAL HELPERS & VALIDATION
+// ============================================================================
 
-export const cleanEnvValue = (val?: string): string => {
+export const cleanEnvValue = (val?: string | null): string => {
   if (!val || typeof val !== 'string') return '';
   return val.trim().replace(/^["']|["']$/g, '').trim();
 };
 
-export const cleanUrl = (raw?: string): string => {
+export const cleanUrl = (raw?: string | null): string => {
   let url = cleanEnvValue(raw);
   if (!url) return '';
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     url = `https://${url}`;
   }
-  return url;
+  return url.replace(/\/+$/, '');
 };
 
-export const isValidHttpUrl = (stringUrl?: string): boolean => {
+export const isValidHttpUrl = (stringUrl?: string | null): boolean => {
   if (!stringUrl) return false;
   try {
     const url = new URL(stringUrl);
@@ -33,11 +34,18 @@ export const isValidHttpUrl = (stringUrl?: string): boolean => {
   }
 };
 
+const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
 export const isSupabaseConfigured = (): boolean => {
   const url = cleanUrl(rawSupabaseUrl);
   const key = cleanEnvValue(rawSupabaseAnonKey);
   return Boolean(isValidHttpUrl(url) && key && key.length > 20 && !key.includes('tu-anon-public-key'));
 };
+
+// ============================================================================
+// CLIENT INITIALIZATION
+// ============================================================================
 
 export const supabase: SupabaseClient | null = (() => {
   try {
@@ -59,6 +67,89 @@ export const supabase: SupabaseClient | null = (() => {
   }
 })();
 
+// ============================================================================
+// DATA SANITIZATION (PREVIENE ERROR 22007 "invalid input syntax for type date: ''")
+// ============================================================================
+
+function sanitizeDate(d?: string | null): string | null {
+  if (!d || typeof d !== 'string') return null;
+  const trimmed = d.trim();
+  if (trimmed === '' || trimmed === 'null' || trimmed === 'undefined') return null;
+  if (/^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+    return trimmed.slice(0, 10);
+  }
+  return null;
+}
+
+function sanitizeStr(s?: string | null): string | null {
+  if (!s || typeof s !== 'string') return null;
+  const trimmed = s.trim();
+  return trimmed === '' ? null : trimmed;
+}
+
+export function sanitizeAlumnoForSupabase(alumno: Alumno) {
+  return {
+    id: String(alumno.id),
+    organizacion_id: sanitizeStr(alumno.organizacion_id) || 'org-1',
+    profesor_id: sanitizeStr(alumno.profesor_id) || 'prof-1',
+    grupo_id: sanitizeStr(alumno.grupo_id),
+    nombre: sanitizeStr(alumno.nombre) || 'Sin Nombre',
+    apellido: sanitizeStr(alumno.apellido) || 'Sin Apellido',
+    dni: sanitizeStr(alumno.dni),
+    telefono: sanitizeStr(alumno.telefono) || '+5491100000000',
+    email: sanitizeStr(alumno.email),
+    direccion: sanitizeStr(alumno.direccion),
+    fecha_nacimiento: sanitizeDate(alumno.fecha_nacimiento) || '1990-01-01',
+    fecha_inicio: sanitizeDate(alumno.fecha_inicio) || new Date().toISOString().split('T')[0],
+    estado_activo: alumno.estado_activo !== false,
+
+    contacto_emergencia_nombre: sanitizeStr(alumno.contacto_emergencia_nombre),
+    contacto_emergencia_telefono: sanitizeStr(alumno.contacto_emergencia_telefono),
+    contacto_emergencia_parentesco: sanitizeStr(alumno.contacto_emergencia_parentesco),
+    obra_social: sanitizeStr(alumno.obra_social),
+    numero_afiliado: sanitizeStr(alumno.numero_afiliado),
+    grupo_sanguineo: sanitizeStr(alumno.grupo_sanguineo),
+    genero: alumno.genero || 'masculino',
+    objetivo_principal: sanitizeStr(alumno.objetivo_principal),
+    antecedentes_medicos: sanitizeStr(alumno.antecedentes_medicos),
+
+    apto_medico_estado: alumno.apto_medico_estado || 'pendiente',
+    apto_medico_vencimiento: sanitizeDate(alumno.apto_medico_vencimiento),
+    ocupacion: sanitizeStr(alumno.ocupacion),
+    notas_admision: sanitizeStr(alumno.notas_admision),
+
+    fecha_pago_cuota: sanitizeDate(alumno.fecha_pago_cuota),
+    fecha_vencimiento_cuota: sanitizeDate(alumno.fecha_vencimiento_cuota),
+    cuota_al_dia: alumno.cuota_al_dia !== false,
+
+    alerta_lesion_activa: sanitizeStr(alumno.alerta_lesion_activa),
+    zona_dolor_principal: sanitizeStr(alumno.zona_dolor_principal),
+    dolor_eva_actual: Number(alumno.dolor_eva_actual) || 0.0,
+    decision_actual: alumno.decision_actual || 'ENTRENAR',
+
+    created_at: alumno.created_at || new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+export function sanitizeRutinaForSupabase(rutina: Rutina) {
+  return {
+    id: String(rutina.id),
+    alumno_id: String(rutina.alumno_id),
+    nombre_rutina: sanitizeStr(rutina.nombre_rutina) || 'Rutina',
+    fecha_inicio: sanitizeDate(rutina.fecha_inicio) || new Date().toISOString().split('T')[0],
+    fecha_cambio: sanitizeDate(rutina.fecha_cambio) || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+    activa: rutina.activa !== false,
+    orden: Number(rutina.orden) || 1,
+    notas_generales: sanitizeStr(rutina.notas_generales),
+    updated_at: new Date().toISOString(),
+  };
+}
+
+// ============================================================================
+// SUPABASE CRUD METHODS
+// ============================================================================
+
 export async function fetchStudentsFromSupabase(): Promise<Alumno[] | null> {
   if (!supabase) return null;
   try {
@@ -73,26 +164,31 @@ export async function fetchStudentsFromSupabase(): Promise<Alumno[] | null> {
     }
     return data as Alumno[];
   } catch (err) {
-    console.warn('[Supabase] Connection error:', err);
+    console.warn('[Supabase] Connection error fetching alumnos:', err);
     return null;
   }
 }
 
-export async function saveStudentToSupabase(alumno: Alumno): Promise<boolean> {
-  if (!supabase) return false;
+export async function saveStudentToSupabase(
+  alumno: Alumno
+): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) {
+    return { success: false, error: 'Supabase no está configurado.' };
+  }
   try {
+    const sanitized = sanitizeAlumnoForSupabase(alumno);
     const { error } = await supabase
       .from('alumnos')
-      .upsert(alumno, { onConflict: 'id' });
+      .upsert(sanitized, { onConflict: 'id' });
 
     if (error) {
-      console.warn('[Supabase] Error saving alumno:', error.message);
-      return false;
+      console.error('[Supabase] Error saving alumno:', error.message, error);
+      return { success: false, error: error.message };
     }
-    return true;
-  } catch (err) {
-    console.warn('[Supabase] Connection error:', err);
-    return false;
+    return { success: true };
+  } catch (err: any) {
+    console.error('[Supabase] Exception saving alumno:', err);
+    return { success: false, error: err?.message || String(err) };
   }
 }
 
@@ -114,7 +210,7 @@ export async function deleteStudentFromSupabase(alumnoId: string): Promise<boole
     }
     return true;
   } catch (err) {
-    console.warn('[Supabase] Connection error:', err);
+    console.warn('[Supabase] Connection error deleting alumno:', err);
     return false;
   }
 }
@@ -147,7 +243,7 @@ export async function fetchGroupsFromSupabase(): Promise<Grupo[] | null> {
     }
     return data as Grupo[];
   } catch (err) {
-    console.warn('[Supabase] Connection error:', err);
+    console.warn('[Supabase] Connection error fetching grupos:', err);
     return null;
   }
 }
@@ -157,7 +253,14 @@ export async function saveGroupToSupabase(grupo: Grupo): Promise<boolean> {
   try {
     const { error } = await supabase
       .from('grupos')
-      .upsert(grupo, { onConflict: 'id' });
+      .upsert({
+        id: String(grupo.id),
+        profesor_id: sanitizeStr(grupo.profesor_id) || 'prof-1',
+        organizacion_id: sanitizeStr(grupo.organizacion_id) || 'org-1',
+        nombre_grupo: sanitizeStr(grupo.nombre_grupo) || 'Grupo',
+        horario: sanitizeStr(grupo.horario) || 'General',
+        descripcion: sanitizeStr(grupo.descripcion),
+      }, { onConflict: 'id' });
 
     if (error) {
       console.warn('[Supabase] Error saving grupo:', error.message);
@@ -165,7 +268,7 @@ export async function saveGroupToSupabase(grupo: Grupo): Promise<boolean> {
     }
     return true;
   } catch (err) {
-    console.warn('[Supabase] Connection error:', err);
+    console.warn('[Supabase] Connection error saving grupo:', err);
     return false;
   }
 }
@@ -184,7 +287,7 @@ export async function deleteGroupFromSupabase(grupoId: string): Promise<boolean>
     }
     return true;
   } catch (err) {
-    console.warn('[Supabase] Connection error:', err);
+    console.warn('[Supabase] Connection error deleting grupo:', err);
     return false;
   }
 }
@@ -208,7 +311,6 @@ export async function fetchRoutinesFromSupabase(alumnoId: string): Promise<Rutin
       return data as Rutina[];
     }
 
-    // Fallback directo por tablas
     const { data: ruts, error: rError } = await supabase
       .from('rutinas')
       .select('*')
@@ -256,63 +358,64 @@ export async function fetchRoutinesFromSupabase(alumnoId: string): Promise<Rutin
   }
 }
 
-export async function saveRoutineToSupabase(rutina: Rutina): Promise<boolean> {
-  if (!supabase) return false;
+export async function saveRoutineToSupabase(
+  rutina: Rutina
+): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) {
+    return { success: false, error: 'Supabase no está configurado.' };
+  }
   try {
+    // 1. Guardar cabecera de la Rutina
+    const sanitizedRutina = sanitizeRutinaForSupabase(rutina);
     const { error: rutError } = await supabase
       .from('rutinas')
-      .upsert({
-        id: rutina.id,
-        alumno_id: rutina.alumno_id,
-        nombre_rutina: rutina.nombre_rutina,
-        fecha_inicio: rutina.fecha_inicio,
-        fecha_cambio: rutina.fecha_cambio,
-        activa: rutina.activa,
-        orden: rutina.orden,
-        notas_generales: rutina.notas_generales,
-        updated_at: new Date().toISOString()
-      }, { onConflict: 'id' });
+      .upsert(sanitizedRutina, { onConflict: 'id' });
 
     if (rutError) throw rutError;
 
-    for (const bloque of rutina.bloques) {
-      const { error: blkError } = await supabase
-        .from('bloques_rutina')
-        .upsert({
-          id: bloque.id,
-          rutina_id: rutina.id,
-          nombre_sub_pestana: bloque.nombre_sub_pestana,
-          orden: bloque.orden
-        }, { onConflict: 'id' });
-
-      if (blkError) throw blkError;
-
-      for (const ej of bloque.ejercicios) {
-        const { error: ejError } = await supabase
-          .from('ejercicios_rutina')
+    // 2. Guardar Bloques & Ejercicios
+    if (rutina.bloques && Array.isArray(rutina.bloques)) {
+      for (const bloque of rutina.bloques) {
+        const { error: blkError } = await supabase
+          .from('bloques_rutina')
           .upsert({
-            id: ej.id,
-            bloque_id: bloque.id,
-            orden: ej.orden,
-            ejercicio: ej.ejercicio,
-            series: ej.series,
-            repeticiones: ej.repeticiones,
-            carga: ej.carga || null,
-            pausa: ej.pausa,
-            rpe_objetivo: ej.rpe_objetivo || null,
-            tipo_cadena: ej.tipo_cadena || null,
-            observaciones_dosificacion: ej.observaciones_dosificacion,
-            video_url: ej.video_url || null
+            id: String(bloque.id),
+            rutina_id: String(rutina.id),
+            nombre_sub_pestana: String(bloque.nombre_sub_pestana || 'Día 1').trim(),
+            orden: Number(bloque.orden) || 1
           }, { onConflict: 'id' });
 
-        if (ejError) throw ejError;
+        if (blkError) throw blkError;
+
+        if (bloque.ejercicios && Array.isArray(bloque.ejercicios)) {
+          for (const ej of bloque.ejercicios) {
+            const { error: ejError } = await supabase
+              .from('ejercicios_rutina')
+              .upsert({
+                id: String(ej.id),
+                bloque_id: String(bloque.id),
+                orden: Number(ej.orden) || 1,
+                ejercicio: sanitizeStr(ej.ejercicio) || 'Ejercicio',
+                series: sanitizeStr(ej.series) || '3',
+                repeticiones: sanitizeStr(ej.repeticiones) || '10',
+                carga: sanitizeStr(ej.carga),
+                pausa: sanitizeStr(ej.pausa) || '60s',
+                rpe_objetivo: sanitizeStr(ej.rpe_objetivo),
+                tipo_cadena: sanitizeStr(ej.tipo_cadena),
+                observaciones_dosificacion: sanitizeStr(ej.observaciones_dosificacion),
+                video_url: sanitizeStr(ej.video_url)
+              }, { onConflict: 'id' });
+
+            if (ejError) throw ejError;
+          }
+        }
       }
     }
 
-    return true;
-  } catch (err) {
-    console.warn('[Supabase] Error saving rutina:', err);
-    return false;
+    return { success: true };
+  } catch (err: any) {
+    console.error('[Supabase] Error saving rutina:', err);
+    return { success: false, error: err?.message || String(err) };
   }
 }
 
@@ -330,7 +433,7 @@ export async function deleteRoutineFromSupabase(rutinaId: string): Promise<boole
     }
     return true;
   } catch (err) {
-    console.warn('[Supabase] Connection error:', err);
+    console.warn('[Supabase] Connection error deleting rutina:', err);
     return false;
   }
 }
