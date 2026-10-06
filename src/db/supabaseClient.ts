@@ -4,7 +4,6 @@ import { Alumno, Grupo, Rutina, EvaluacionClinica, SeguimientoDiario } from '../
 const rawSupabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const rawSupabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Clean quotes or extra spaces if passed in env
 export const cleanEnvValue = (val?: string): string => {
   if (!val || typeof val !== 'string') return '';
   return val.trim().replace(/^["']|["']$/g, '').trim();
@@ -40,7 +39,6 @@ export const isSupabaseConfigured = (): boolean => {
   return Boolean(isValidHttpUrl(url) && key && key.length > 20 && !key.includes('tu-anon-public-key'));
 };
 
-// Safe Supabase client initialization
 export const supabase: SupabaseClient | null = (() => {
   try {
     if (!isSupabaseConfigured()) {
@@ -60,10 +58,6 @@ export const supabase: SupabaseClient | null = (() => {
     return null;
   }
 })();
-
-// ============================================================================
-// SUPABASE SYNC & CRUD HELPERS
-// ============================================================================
 
 export async function fetchStudentsFromSupabase(): Promise<Alumno[] | null> {
   if (!supabase) return null;
@@ -105,12 +99,10 @@ export async function saveStudentToSupabase(alumno: Alumno): Promise<boolean> {
 export async function deleteStudentFromSupabase(alumnoId: string): Promise<boolean> {
   if (!supabase) return false;
   try {
-    // 1. Borrar registros hijos primero para no violar claves foráneas
     await supabase.from('rutinas').delete().eq('alumno_id', alumnoId);
     await supabase.from('evaluaciones_clinicas').delete().eq('alumno_id', alumnoId);
     await supabase.from('seguimiento_diario').delete().eq('alumno_id', alumnoId);
 
-    // 2. Borrar al alumno
     const { error } = await supabase
       .from('alumnos')
       .delete()
@@ -212,13 +204,54 @@ export async function fetchRoutinesFromSupabase(alumnoId: string): Promise<Rutin
       .eq('alumno_id', alumnoId)
       .order('orden', { ascending: true });
 
-    if (error) {
-      console.warn('[Supabase] Error fetching rutinas:', error.message);
-      return null;
+    if (!error && data && data.length > 0) {
+      return data as Rutina[];
     }
-    return data as Rutina[];
+
+    // Fallback directo por tablas
+    const { data: ruts, error: rError } = await supabase
+      .from('rutinas')
+      .select('*')
+      .eq('alumno_id', alumnoId)
+      .order('orden', { ascending: true });
+
+    if (rError || !ruts || ruts.length === 0) return [];
+
+    const rutIds = ruts.map((r) => r.id);
+    const { data: blks } = await supabase
+      .from('bloques_rutina')
+      .select('*')
+      .in('rutina_id', rutIds)
+      .order('orden', { ascending: true });
+
+    const blkIds = (blks || []).map((b) => b.id);
+    const { data: ejs } = await supabase
+      .from('ejercicios_rutina')
+      .select('*')
+      .in('bloque_id', blkIds)
+      .order('orden', { ascending: true });
+
+    const ejsByBlock: Record<string, any[]> = {};
+    (ejs || []).forEach((e) => {
+      if (!ejsByBlock[e.bloque_id]) ejsByBlock[e.bloque_id] = [];
+      ejsByBlock[e.bloque_id].push(e);
+    });
+
+    const blksByRoutine: Record<string, any[]> = {};
+    (blks || []).forEach((b) => {
+      if (!blksByRoutine[b.rutina_id]) blksByRoutine[b.rutina_id] = [];
+      blksByRoutine[b.rutina_id].push({
+        ...b,
+        ejercicios: ejsByBlock[b.id] || []
+      });
+    });
+
+    return ruts.map((r) => ({
+      ...r,
+      bloques: blksByRoutine[r.id] || []
+    })) as Rutina[];
   } catch (err) {
-    console.warn('[Supabase] Connection error:', err);
+    console.warn('[Supabase] Connection error fetching rutinas:', err);
     return null;
   }
 }
@@ -226,7 +259,6 @@ export async function fetchRoutinesFromSupabase(alumnoId: string): Promise<Rutin
 export async function saveRoutineToSupabase(rutina: Rutina): Promise<boolean> {
   if (!supabase) return false;
   try {
-    // 1. Guardar cabecera de rutina
     const { error: rutError } = await supabase
       .from('rutinas')
       .upsert({
@@ -243,7 +275,6 @@ export async function saveRoutineToSupabase(rutina: Rutina): Promise<boolean> {
 
     if (rutError) throw rutError;
 
-    // 2. Guardar bloques y ejercicios
     for (const bloque of rutina.bloques) {
       const { error: blkError } = await supabase
         .from('bloques_rutina')

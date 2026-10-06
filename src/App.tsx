@@ -30,6 +30,7 @@ import { SupabaseSqlModal } from './components/SupabaseSqlModal';
 import {
   isSupabaseConfigured,
   fetchStudentsFromSupabase,
+  fetchRoutinesFromSupabase,
   saveStudentToSupabase,
   deleteStudentFromSupabase,
   clearAllStudentsFromSupabase,
@@ -109,26 +110,35 @@ export default function App() {
       setAlumnos(allAlumnos);
       setGrupos(allGrupos);
 
-      // Cloud sync con Supabase ÚNICAMENTE en el arranque inicial para no resucitar alumnos borrados
+      // Cloud sync con Supabase en el arranque inicial
       if (isSupabaseConfigured() && !initialCloudSyncDone.current) {
         initialCloudSyncDone.current = true;
-        fetchStudentsFromSupabase().then(async (cloudAlumnos) => {
+        try {
+          const cloudAlumnos = await fetchStudentsFromSupabase();
           if (cloudAlumnos && cloudAlumnos.length > 0) {
             setAlumnos(cloudAlumnos);
             for (const a of cloudAlumnos) {
               await saveAlumno(a);
+              // Traer las rutinas de la nube para este alumno
+              const cloudRuts = await fetchRoutinesFromSupabase(a.id);
+              if (cloudRuts && cloudRuts.length > 0) {
+                for (const r of cloudRuts) {
+                  await saveRutina(r);
+                }
+              }
             }
           }
-        }).catch((e) => console.warn('[Supabase Sync]', e));
 
-        fetchGroupsFromSupabase().then(async (cloudGrupos) => {
+          const cloudGrupos = await fetchGroupsFromSupabase();
           if (cloudGrupos && cloudGrupos.length > 0) {
             setGrupos(cloudGrupos);
             for (const g of cloudGrupos) {
               await saveGrupo(g);
             }
           }
-        }).catch((e) => console.warn('[Supabase Sync]', e));
+        } catch (e) {
+          console.warn('[Supabase Initial Sync]', e);
+        }
       }
 
       // Pre-cargar rutinas en memoria caché para evitar pantallas en blanco al navegar entre alumnos
@@ -194,16 +204,25 @@ export default function App() {
       getEvaluacionClinica(selectedStudentId)
     ]).then(async ([ruts, ev]) => {
       if (isMounted) {
-        if (ruts.length === 0) {
+        let finalRuts = ruts;
+        // Si no hay rutinas en local, verificar en Supabase antes de crear una en blanco
+        if (finalRuts.length === 0 && isSupabaseConfigured()) {
+          const cloudRuts = await fetchRoutinesFromSupabase(selectedStudentId);
+          if (cloudRuts && cloudRuts.length > 0) {
+            finalRuts = cloudRuts;
+            for (const r of cloudRuts) {
+              await saveRutina(r);
+            }
+          }
+        }
+        if (finalRuts.length === 0) {
           // Si el alumno no tiene ninguna rutina propia, crearle una automáticamente única para él
           const newRoutine = await handleCreateNewRoutine(selectedStudentId);
           if (isMounted) {
             setCurrentRutinas([newRoutine]);
-            setRoutinesByStudent((prev) => ({ ...prev, [selectedStudentId]: [newRoutine] }));
           }
         } else {
-          setCurrentRutinas(ruts);
-          setRoutinesByStudent((prev) => ({ ...prev, [selectedStudentId]: ruts }));
+          setCurrentRutinas(finalRuts);
         }
         setCurrentEvaluacion(ev);
       }

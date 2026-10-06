@@ -11,29 +11,29 @@ export function buildRoutinePDF(alumno: Alumno, rutina: Rutina, evaluacion?: Eva
   const pageWidth = doc.internal.pageSize.getWidth();
   let y = 18;
 
-  // Encabezado Banner Oscuro
-  doc.setFillColor(9, 13, 22); // #090D16
+  // Header Dark Banner
+  doc.setFillColor(9, 13, 22);
   doc.rect(0, 0, pageWidth, 28, 'F');
 
-  doc.setTextColor(16, 185, 129); // emerald-500
+  doc.setTextColor(16, 185, 129);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
   doc.text('GYMFITPRO MANAGER', 14, 12);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  doc.setTextColor(226, 232, 240); // slate-200
+  doc.setTextColor(226, 232, 240);
   doc.text('PRESCRIPCIÓN BIOMECÁNICA & GESTIÓN DE CARGA (Demanda vs. Capacidad)', 14, 18);
   doc.text(`Fecha de emisión: ${new Date().toLocaleDateString('es-ES')}`, pageWidth - 14, 18, { align: 'right' });
 
   y = 36;
 
-  // Ficha del Alumno y Rutina
-  doc.setFillColor(248, 250, 252); // slate-50
-  doc.setDrawColor(226, 232, 240); // slate-200
+  // Athlete & Routine Info Box
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
   doc.roundedRect(14, y, pageWidth - 28, 26, 2, 2, 'FD');
 
-  doc.setTextColor(15, 23, 42); // slate-900
+  doc.setTextColor(15, 23, 42);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(12);
   doc.text(`${alumno.nombre} ${alumno.apellido}`, 18, y + 7);
@@ -51,13 +51,13 @@ export function buildRoutinePDF(alumno: Alumno, rutina: Rutina, evaluacion?: Eva
 
   y += 32;
 
-  // Alerta de Lesión / Dolor (si existe)
+  // Active Injury Alert
   if (alumno.alerta_lesion_activa || (alumno.dolor_eva_actual && alumno.dolor_eva_actual > 0)) {
-    doc.setFillColor(254, 242, 242); // red-50
-    doc.setDrawColor(254, 202, 202); // red-200
+    doc.setFillColor(254, 242, 242);
+    doc.setDrawColor(254, 202, 202);
     doc.roundedRect(14, y, pageWidth - 28, 14, 2, 2, 'FD');
 
-    doc.setTextColor(185, 28, 28); // red-700
+    doc.setTextColor(185, 28, 28);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.text(`ALERTA CLÍNICA / PRECAUCIÓN BIOMECÁNICA (EVA: ${alumno.dolor_eva_actual || 0}/10)`, 18, y + 5);
@@ -70,15 +70,14 @@ export function buildRoutinePDF(alumno: Alumno, rutina: Rutina, evaluacion?: Eva
     y += 18;
   }
 
-  // Bloques y Días de Entrenamiento
+  // Routine Blocks & Exercises
   rutina.bloques.forEach((bloque) => {
     if (y > 240) {
       doc.addPage();
       y = 20;
     }
 
-    // Cabecera del bloque
-    doc.setFillColor(15, 23, 42); // slate-900
+    doc.setFillColor(15, 23, 42);
     doc.rect(14, y, pageWidth - 28, 7, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFont('helvetica', 'bold');
@@ -86,8 +85,7 @@ export function buildRoutinePDF(alumno: Alumno, rutina: Rutina, evaluacion?: Eva
     doc.text(bloque.nombre_sub_pestana.toUpperCase(), 17, y + 5);
     y += 9;
 
-    // Encabezado de la tabla
-    doc.setFillColor(241, 245, 249); // slate-100
+    doc.setFillColor(241, 245, 249);
     doc.rect(14, y, pageWidth - 28, 6, 'F');
     doc.setTextColor(71, 85, 105);
     doc.setFont('helvetica', 'bold');
@@ -101,7 +99,6 @@ export function buildRoutinePDF(alumno: Alumno, rutina: Rutina, evaluacion?: Eva
     doc.text('OBSERVACIONES', 174, y + 4.2);
     y += 7;
 
-    // Filas de ejercicios
     bloque.ejercicios.forEach((ej, idx) => {
       if (y > 265) {
         doc.addPage();
@@ -139,7 +136,6 @@ export function buildRoutinePDF(alumno: Alumno, rutina: Rutina, evaluacion?: Eva
     y += 4;
   });
 
-  // Criterio Terapéutico si hay evaluación médica
   if (evaluacion && y < 250) {
     y += 2;
     doc.setDrawColor(203, 213, 225);
@@ -157,7 +153,6 @@ export function buildRoutinePDF(alumno: Alumno, rutina: Rutina, evaluacion?: Eva
     );
   }
 
-  // Paginación al pie
   const totalPages = doc.internal.pages.length - 1;
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
@@ -180,16 +175,15 @@ export function exportRoutineToPDF(alumno: Alumno, rutina: Rutina, evaluacion?: 
   doc.save(filename);
 }
 
-export async function shareRoutineViaWhatsApp(
+export function shareRoutineViaWhatsApp(
   alumno: Alumno,
   rutina: Rutina,
   evaluacion?: EvaluacionClinica | null
 ) {
-  // 1. Generar el documento PDF
+  // 1. Descarga automática del archivo PDF
   const doc = buildRoutinePDF(alumno, rutina, evaluacion);
   const filename = `Rutina_${alumno.nombre}_${alumno.apellido}.pdf`.replace(/\s+/g, '_');
-  const pdfBlob = doc.output('blob');
-  const pdfFile = new File([pdfBlob], filename, { type: 'application/pdf' });
+  doc.save(filename);
 
   // 2. Mensaje limpio y profesional con los datos del alumno y de la rutina
   let message = `*GYMFITPRO MANAGER - PLAN DE ENTRENAMIENTO*\n`;
@@ -205,36 +199,14 @@ export async function shareRoutineViaWhatsApp(
     message += `💡 *Pauta General:* ${rutina.notas_generales}\n`;
   }
 
-  message += `\n📄 *Rutina en PDF:* Te comparto adjunto el archivo PDF con tu planificación completa, series, repeticiones, cargas y descansos para que puedas consultarla en tu celular o imprimirla.\n`;
+  message += `\n📄 *Rutina en PDF:* Te comparto adjunto el archivo PDF con tu planificación completa, series, repeticiones, cargas y descansos para que puedas consultarla o imprimirla.\n`;
   message += `\n_Emitido con GymFitPro Manager · Control de Demanda vs. Capacidad_`;
 
   const phone = alumno.telefono ? alumno.telefono.replace(/[^0-9]/g, '') : '';
   const encodedText = encodeURIComponent(message);
   const waUrl = phone ? `https://wa.me/${phone}?text=${encodedText}` : `https://wa.me/?text=${encodedText}`;
 
-  // 3. Si el dispositivo (celulares o navegadores con soporte) permite compartir archivos directamente:
-  if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare) {
-    try {
-      if (navigator.canShare({ files: [pdfFile] })) {
-        await navigator.share({
-          files: [pdfFile],
-          title: `Rutina ${rutina.nombre_rutina} - ${alumno.nombre} ${alumno.apellido}`,
-          text: message
-        });
-        return;
-      }
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        return; // El usuario canceló la ventana de compartir
-      }
-    }
-  }
-
-  // 4. Fallback para PC / WhatsApp Web:
-  // Descargamos el archivo PDF en la computadora
-  doc.save(filename);
-
-  // Y abrimos WhatsApp con el mensaje ya redactado para adjuntar el PDF recién descargado
+  // 3. Redirección DIRECTA al chat de WhatsApp de ese alumno (sin ventanas del sistema)
   const link = document.createElement('a');
   link.href = waUrl;
   link.target = '_blank';
