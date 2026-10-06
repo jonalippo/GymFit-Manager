@@ -173,21 +173,51 @@ export async function saveStudentToSupabase(
   alumno: Alumno
 ): Promise<{ success: boolean; error?: string }> {
   if (!supabase) {
+    console.warn('[Supabase] Guardado en la nube abortado: el cliente de Supabase no está conectado.');
     return { success: false, error: 'Supabase no está configurado.' };
   }
   try {
     const sanitized = sanitizeAlumnoForSupabase(alumno);
-    const { error } = await supabase
+
+    // Asegurar que el grupo exista en Supabase antes de insertar al alumno
+    if (sanitized.grupo_id) {
+      try {
+        await supabase.from('grupos').upsert(
+          {
+            id: sanitized.grupo_id,
+            organizacion_id: sanitized.organizacion_id || 'org-1',
+            profesor_id: sanitized.profesor_id || 'prof-1',
+            nombre_grupo: 'Turno General',
+            horario: 'General'
+          },
+          { onConflict: 'id' }
+        );
+      } catch (grpErr) {
+        console.warn('[Supabase] Auto-creación de grupo omitida:', grpErr);
+      }
+    }
+
+    console.log('[Supabase] Enviando alumno a la tabla alumnos:', sanitized);
+    let { error } = await supabase
       .from('alumnos')
       .upsert(sanitized, { onConflict: 'id' });
 
+    // Si la base de datos rechaza grupo_id por clave foránea, reintentar con null
+    if (error && error.message && error.message.includes('alumnos_grupo_id_fkey')) {
+      console.warn('[Supabase] Clave foránea de grupo_id no encontrada. Reintentando con grupo_id null...');
+      const fallback = { ...sanitized, grupo_id: null };
+      const retry = await supabase.from('alumnos').upsert(fallback, { onConflict: 'id' });
+      error = retry.error;
+    }
+
     if (error) {
-      console.error('[Supabase] Error saving alumno:', error.message, error);
+      console.error('[Supabase] Error devuelto por PostgreSQL:', error);
       return { success: false, error: error.message };
     }
+    console.log('[Supabase] ✓ Alumno guardado exitosamente en la nube.');
     return { success: true };
   } catch (err: any) {
-    console.error('[Supabase] Exception saving alumno:', err);
+    console.error('[Supabase] Excepción de red al guardar alumno:', err);
     return { success: false, error: err?.message || String(err) };
   }
 }
