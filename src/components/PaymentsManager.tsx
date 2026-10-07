@@ -226,15 +226,9 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
             <DollarSign className="w-6 h-6" />
           </div>
           <div>
-            <h2 className="text-xl font-black text-white tracking-tight flex items-center gap-2">
-              <span>Gestión de Pagos & Cuotas</span>
-              <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-mono">
-                {formatMonthName(selectedMonth + '-01')}
-              </span>
+            <h2 className="text-base flex flex-col sm:flex-row sm:text-lg font-bold text-white tracking-tight">
+              <span>Gestión de Pagos</span>
             </h2>
-            <p className="text-xs text-slate-400">
-              Control de ingresos, recaudación por grupos y actualización de estados
-            </p>
           </div>
         </div>
 
@@ -324,14 +318,14 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
 
       {/* 3. Gráfica de Recaudación por Grupo */}
       <div className="p-4 sm:p-5 rounded-3xl bg-slate-900 border border-slate-800 shadow-lg space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row items-center justify-between">
           <div className="flex items-center gap-2">
             <BarChart3 className="w-5 h-5 text-emerald-400" />
-            <h3 className="text-base font-bold text-white">
+            <h3 className="text-[14px] mb-4 sm:mb-0 sm:text-base font-bold text-white">
               Recaudación por Grupos de Entrenamiento ({formatMonthName(selectedMonth + '-01')})
             </h3>
           </div>
-          <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-xl border border-emerald-500/20">
+          <span className="text-md font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-xl border border-emerald-500/20">
             Total: ${metrics.totalRecaudadoMes.toLocaleString()}
           </span>
         </div>
@@ -372,7 +366,7 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
             <PlusCircle className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="text-base font-bold text-white">Registrar un Nuevo Pago</h3>
+            <h3 className="text-[14px] sm:text-base font-bold text-white">Registrar un Nuevo Pago</h3>
             <p className="text-xs text-slate-400">
               Busca un alumno, ingresa el monto, fechas de inicio y vencimiento para asentar el cobro
             </p>
@@ -502,7 +496,7 @@ export const PaymentsManager: React.FC<PaymentsManagerProps> = ({
       <div className="p-4 sm:p-6 rounded-3xl bg-slate-900 border border-slate-800 shadow-xl space-y-4">
         <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
           <div>
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <h3 className="text-[14px] sm:text-base font-bold text-white flex items-center gap-2">
               <Users className="w-5 h-5 text-emerald-400" />
               <span>Estado de Cuotas por Alumno</span>
             </h3>

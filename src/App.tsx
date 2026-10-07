@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Alumno, Grupo, Rutina, EvaluacionClinica, RolProfesor } from './types';
+import { DashboardHome } from './components/DashboardHome';
 import {
   openDB,
   seedInitialDataIfEmpty,
@@ -43,6 +44,7 @@ import {
 } from './db/supabaseClient';
 
 import {
+  Home,
   Users,
   ClipboardList,
   Activity,
@@ -109,14 +111,14 @@ export default function App() {
   const [activeDockStudents, setActiveDockStudents] = useState<Alumno[]>([]);
 
   // Navigation View (Alumnos, Grupos, Pagos, Rutina, Evaluacion)
-  const [activeView, setActiveView] = useState<'alumnos' | 'grupos' | 'pagos' | 'rutina' | 'evaluacion'>(() => {
+  const [activeView, setActiveView] = useState<'home' |'alumnos' | 'grupos' | 'pagos' | 'rutina' | 'evaluacion'>(() => {
     try {
       const saved = localStorage.getItem('fitpro_active_view');
-      if (saved && ['alumnos', 'grupos', 'pagos', 'rutina', 'evaluacion'].includes(saved)) {
+      if (saved && ['alumnos', 'alumnos', 'grupos', 'pagos', 'rutina', 'evaluacion'].includes(saved)) {
         return saved as any;
       }
     } catch {}
-    return 'alumnos';
+    return 'home';
   });
 
   // Guarda automáticamente la pantalla actual al navegar
@@ -619,7 +621,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#090D16] text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-white">
-      {/* Top Header */}
       <Header
         activeView={activeView}
         onNavigate={(view) => setActiveView(view)}
@@ -631,8 +632,16 @@ export default function App() {
 
       {/* Main Viewport Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 pt-5 pb-24 overflow-x-hidden">
-        {/* Mobile quick tabs */}
         <div className="md:hidden flex items-center gap-1.5 mb-4 p-1 rounded-2xl bg-slate-900 border border-slate-800 text-xs shadow-sm">
+          <button
+            onClick={() => setActiveView('home')}
+            className={`flex-1 py-2 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+              activeView === 'home' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Home className="w-3.5 h-3.5" />
+            <span>Inicio</span>
+          </button>
           <button
             onClick={() => setActiveView('alumnos')}
             className={`flex-1 py-2 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
@@ -661,6 +670,18 @@ export default function App() {
             <span>Pagos</span>
           </button>
         </div>
+
+        {/* Vista 0: Dashboard Home */}
+        {activeView === 'home' && (
+          <DashboardHome
+            alumnos={alumnos}
+            grupos={grupos}
+            pagos={pagos}
+            userName={currentUser.name}
+            onNavigate={(view) => setActiveView(view)}
+            onSelectStudent={(alm, view) => handleSelectStudent(alm, view)}
+          />
+        )}
 
         {/* View 1: Alumnos Directory & Gym Floor Hub */}
         {activeView === 'alumnos' && (

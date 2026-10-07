@@ -67,9 +67,6 @@ export const GymFitLogo: React.FC<GymFitLogoProps> = ({
               <span className="text-[#B91C1C] font-black ml-1">Manager</span>
             </span>
           </div>
-          <span className={`${currentSize.sub} text-slate-400 font-mono tracking-wider uppercase leading-tight mt-1 hidden sm:inline`}>
-            Gestión de Sala & Rendimiento
-          </span>
         </div>
       )}
     </div>
