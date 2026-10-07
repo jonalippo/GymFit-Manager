@@ -11,11 +11,11 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png'],
+        includeAssets: ['gymfit-logo.png'],
         manifest: {
           id: '/',
-          name: 'FitPro Manager',
-          short_name: 'FitPro',
+          name: 'GymFit Manager',
+          short_name: 'GymFit',
           description: 'SaaS de entrenamiento y prescripción biomecánica offline-first para salas de gimnasio.',
           theme_color: '#090D16',
           background_color: '#090D16',
@@ -24,19 +24,19 @@ export default defineConfig(() => {
           scope: '/',
           icons: [
             {
-              src: '/pwa-192x192.png',
+              src: '/gymfit-logo.png',
               sizes: '192x192',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-512x512.png',
+              src: '/gymfit-logo.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'any',
             },
             {
-              src: '/pwa-maskable-512x512.png',
+              src: '/gymfit-logo.png',
               sizes: '512x512',
               type: 'image/png',
               purpose: 'maskable',
@@ -63,4 +63,3 @@ export default defineConfig(() => {
     },
   };
 });
-

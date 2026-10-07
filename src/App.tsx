@@ -631,7 +631,7 @@ export default function App() {
       />
 
       {/* Main Viewport Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 pt-5 pb-24 overflow-x-hidden">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-0 pt-5 pb-24 overflow-x-hidden">
         <div className="md:hidden flex items-center gap-1.5 mb-4 p-1 rounded-2xl bg-slate-900 border border-slate-800 text-xs shadow-sm">
           <button
             onClick={() => setActiveView('home')}

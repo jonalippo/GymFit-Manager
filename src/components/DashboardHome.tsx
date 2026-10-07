@@ -125,13 +125,10 @@ export const DashboardHome: React.FC<DashboardHomeProps> = ({
         
         <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div>
-            <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[11px] font-semibold mb-1">
-              <Sparkles className="w-3 h-3" />
-              <span>Centro de Control • GymFit Manager</span>
-            </div>
             <h1 className="text-[16px] sm:text-2xl font-black text-white tracking-tight">
               Bienvenido, {userName.split(' ')[0]} 👋
             </h1>
+            
           </div>
 
           <div className="flex items-center gap-2 text-xs text-slate-400 font-medium bg-slate-950/60 px-3 py-1.5 rounded-xl border border-slate-800/80 shrink-0 w-fit">

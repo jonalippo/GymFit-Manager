@@ -8,6 +8,8 @@ import {
   Plus,
   Trash2,
   Copy,
+  ArrowUp,
+  ArrowDown,
   BookOpen,
   Calendar,
   Check,
@@ -53,10 +55,10 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
   onBackToAlumnos,
   onSwitchStudent,
 }) => {
-  // Filtrar rutinas que pertenecen estrictamente a este alumno
+  // Filter routines strictly belonging to this student
   const studentRoutines = rutinas.filter((r) => r.alumno_id === alumno.id);
 
-  // Rutina activa con persistencia por alumno
+  // Active Routine con persistencia por alumno
   const [activeRoutineId, setActiveRoutineId] = useState<string>(() => {
     if (savedActiveRoutineId && studentRoutines.some((r) => r.id === savedActiveRoutineId)) {
       return savedActiveRoutineId;
@@ -72,7 +74,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
 
   const currentRoutine = studentRoutines.find((r) => r.id === activeRoutineId) || studentRoutines[0] || null;
 
-  // Bloque / Día activo con persistencia por alumno (recuerda si estabas en Día 1, Día 2, etc.)
+  // Active Day / Block con persistencia por alumno (recuerda si estabas en Día 2, Día 3, etc.)
   const [activeBlockId, setActiveBlockId] = useState<string>(() => {
     if (savedActiveBlockId && currentRoutine?.bloques.some((b) => b.id === savedActiveBlockId)) {
       return savedActiveBlockId;
@@ -86,7 +88,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     return currentRoutine?.bloques[0]?.id || '';
   });
 
-  // Guardar y notificar cambio de bloque para que al cambiar de pestaña no se reinicie
+  // Guardar y notificar cambio de día / bloque para no perder la posición al cambiar pestañas
   const handleSelectBlock = (blockId: string) => {
     setActiveBlockId(blockId);
     try {
@@ -97,7 +99,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     }
   };
 
-  // Guardar y notificar cambio de fase/rutina
+  // Guardar y notificar cambio de rutina / fase
   const handleSelectRoutine = (routineId: string) => {
     setActiveRoutineId(routineId);
     try {
@@ -108,39 +110,39 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     }
   };
 
-  // Modo de vista: tabla (planilla) vs tarjetas
+  // View mode for desktop (cards vs table)
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
 
-  // Modal de confirmación para eliminar ejercicio
+  // Exercise Delete Confirmation Modal
   const [exerciseToDelete, setExerciseToDelete] = useState<{ rowIdx: number; name: string } | null>(null);
 
-  // Modal de confirmación para eliminar rutina
+  // Routine Delete Confirmation Modal
   const [showDeleteRoutineModal, setShowDeleteRoutineModal] = useState(false);
 
-  // Banco de ejercicios
+  // Biomechanical library picker
   const [showLibrary, setShowLibrary] = useState(false);
   const [libraryFilter, setLibraryFilter] = useState('');
   const [targetRowForLibrary, setTargetRowForLibrary] = useState<number | null>(null);
 
-  // Modal de fechas y notas generales
+  // Routine Meta Editor Modal
   const [showMetaModal, setShowMetaModal] = useState(false);
   const [editRoutineName, setEditRoutineName] = useState('');
   const [editFechaInicio, setEditFechaInicio] = useState('');
   const [editFechaCambio, setEditFechaCambio] = useState('');
   const [editNotasGenerales, setEditNotasGenerales] = useState('');
 
-  // Edición del nombre de la rutina en línea
+  // Inline Routine Name Editor
   const [isEditingRoutineName, setIsEditingRoutineName] = useState(false);
   const [inlineRoutineName, setInlineRoutineName] = useState('');
 
-  // Renombrar sub-pestaña (Día)
+  // Day Rename state
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [blockNameInput, setBlockNameInput] = useState('');
 
-  // Estado local de la rutina activa
+  // Local state
   const [localRoutine, setLocalRoutine] = useState<Rutina | null>(currentRoutine || null);
 
-  // Sincronizar estado cuando cambie el alumno o las rutinas SIN resetear el día seleccionado
+  // Sincronizar estado cuando cambie el alumno o las rutinas SIN resetear el día donde estaba el usuario
   useEffect(() => {
     const validRoutines = rutinas.filter((r) => r.alumno_id === alumno.id);
     const target =
@@ -158,15 +160,17 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
       setEditFechaCambio(target.fecha_cambio);
       setEditNotasGenerales(target.notas_generales || '');
 
+      // Preservar el bloque actual si aún existe, o restaurar el guardado previamente
       const savedBlock = savedActiveBlockId || localStorage.getItem(`fitpro_active_block_${alumno.id}`);
       if (activeBlockId && target.bloques.some((b) => b.id === activeBlockId)) {
-        // Mantener el bloque actual
+        // Mantener el bloque seleccionado
       } else if (savedBlock && target.bloques.some((b) => b.id === savedBlock)) {
         setActiveBlockId(savedBlock);
       } else {
         setActiveBlockId(target.bloques[0]?.id || '');
       }
     } else {
+      // No limpiar si ya tenemos una rutina cargada localmente (evita parpadeo durante actualización)
       if (validRoutines.length === 0 && !localRoutine) {
         setActiveRoutineId('');
         setActiveBlockId('');
@@ -175,7 +179,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     }
   }, [alumno.id, rutinas, savedActiveBlockId]);
 
-  // Sincronizar cuando el usuario cambia de rutina del mismo alumno
+  // Sincronizar cuando el usuario cambia de fase/rutina del mismo alumno
   useEffect(() => {
     const validRoutines = rutinas.filter((r) => r.alumno_id === alumno.id);
     const target = validRoutines.find((r) => r.id === activeRoutineId);
@@ -253,11 +257,12 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
       id: 'ej-' + Date.now() + Math.random().toString(36).substr(2, 4),
       bloque_id: activeBlock.id,
       orden: atIndex + 1,
-      ejercicio: '',
+      ejercicio: 'Nuevo Ejercicio',
       series: '3',
       repeticiones: '10',
       carga: '',
-      pausa: "60''",
+      carga_p2: '',
+      pausa: '60s',
       observaciones_dosificacion: ''
     };
 
@@ -284,11 +289,12 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
           id: 'ej-' + Date.now(),
           bloque_id: activeBlock.id,
           orden: 1,
-          ejercicio: '',
+          ejercicio: 'Nuevo Ejercicio',
           series: '3',
           repeticiones: '10',
           carga: '',
-          pausa: "60''",
+          carga_p2: '',
+          pausa: '60s',
           observaciones_dosificacion: ''
         }
       ];
@@ -319,11 +325,31 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     const cloned: EjercicioRutina = {
       ...source,
       id: 'ej-' + Date.now() + Math.random().toString(36).substr(2, 4),
-      orden: rowIdx + 2
+      ejercicio: `${source.ejercicio} (Variante)`
     };
 
     const newExs = [...activeBlock.ejercicios];
     newExs.splice(rowIdx + 1, 0, cloned);
+    newExs.forEach((e, idx) => (e.orden = idx + 1));
+
+    const updatedBlocks = localRoutine.bloques.map((b) =>
+      b.id === activeBlock.id ? { ...b, ejercicios: newExs } : b
+    );
+
+    const updatedRoutine = { ...localRoutine, bloques: updatedBlocks, updated_at: new Date().toISOString() };
+    setLocalRoutine(updatedRoutine);
+    onSaveRoutine(updatedRoutine);
+  };
+
+  const handleMoveRow = (rowIdx: number, direction: 'up' | 'down') => {
+    if (!localRoutine || !activeBlock) return;
+    const targetIdx = direction === 'up' ? rowIdx - 1 : rowIdx + 1;
+    if (targetIdx < 0 || targetIdx >= activeBlock.ejercicios.length) return;
+
+    const newExs = [...activeBlock.ejercicios];
+    const temp = newExs[rowIdx];
+    newExs[rowIdx] = newExs[targetIdx];
+    newExs[targetIdx] = temp;
     newExs.forEach((e, idx) => (e.orden = idx + 1));
 
     const updatedBlocks = localRoutine.bloques.map((b) =>
@@ -341,18 +367,19 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     const newBlock: BloqueRutina = {
       id: 'blk-' + Date.now(),
       rutina_id: localRoutine.id,
-      nombre_sub_pestana: `Día ${blockNum}: Principal`,
+      nombre_sub_pestana: `Día ${blockNum}: Bloque de Entrenamiento`,
       orden: blockNum,
       ejercicios: [
         {
           id: 'ej-' + Date.now(),
           bloque_id: 'blk-' + Date.now(),
           orden: 1,
-          ejercicio: '',
+          ejercicio: 'Sentadilla Goblet con Talones Elevados',
           series: '3',
-          repeticiones: '10',
-          carga: '',
-          pausa: "60''",
+          repeticiones: '10-12',
+          carga: '12 kg',
+          carga_p2: '14 kg',
+          pausa: '75s',
           observaciones_dosificacion: ''
         }
       ]
@@ -424,7 +451,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     updatedExercises[targetRowForLibrary] = {
       ...updatedExercises[targetRowForLibrary],
       ejercicio: libEx.nombre,
-      observaciones_dosificacion: libEx.ajuste_biomecanico_sugerido
+      observaciones_dosificacion: ''
     };
 
     const updatedBlocks = localRoutine.bloques.map((b) =>
@@ -469,7 +496,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
 
   return (
     <div className="w-full max-w-full space-y-4 pb-28 overflow-x-hidden">
-      {/* 0. BARRA SUPERIOR: DATOS DEL ALUMNO Y ACCIONES RÁPIDAS */}
+      {/* 0. TOP ACTION BAR WITH PROMINENT BACK BUTTON */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/90 border border-slate-800 p-3 sm:p-4 rounded-2xl shadow-sm">
         <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <button
@@ -491,7 +518,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
           </div>
         </div>
 
-        {/* Botones de Exportar y Selector de Alumnos */}
+        {/* Export & Switcher Buttons */}
         <div className="flex items-center gap-2 shrink-0">
           <button
             onClick={() => exportRoutineToPDF(alumno, localRoutine, evaluacion)}
@@ -502,7 +529,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
           </button>
 
           <button
-            onClick={() => shareRoutineViaWhatsApp(alumno, localRoutine)}
+            onClick={() => shareRoutineViaWhatsApp(alumno, localRoutine, evaluacion)}
             className="flex-1 sm:flex-initial px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm"
           >
             <Share2 className="w-3.5 h-3.5" />
@@ -661,7 +688,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                   <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-white' : 'bg-emerald-500'}`} />
                   <span>Día {idx + 1}</span>
                   <span className={`text-[11px] font-mono ${isActive ? 'text-emerald-100 font-normal' : 'text-slate-400'}`}>
-                    {count} ejer.
+                    {count} {count === 1 ? 'ejer.' : 'ejer.'}
                   </span>
                 </button>
               );
@@ -780,27 +807,41 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               </div>
             </div>
 
-            {/* TABLA ESTILO PLANILLA EXACTA COMO EN LA IMAGEN */}
+            {/* TABLA ESTILO PLANILLA CON SERIES Y REPETICIONES AMPLIAS Y OBSERVACIONES COMPACTAS */}
             {viewMode === 'table' ? (
               <div className="w-full overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-950/80 text-slate-400 font-bold border-b border-slate-800/80 uppercase tracking-wider text-[11px] font-mono">
-                      <th className="py-3 px-3 w-10 text-center">#</th>
-                      <th className="py-3 px-3 min-w-[220px]">EJERCICIO</th>
-                      <th className="py-3 px-2 w-20 text-center">SERIES</th>
-                      <th className="py-3 px-2 w-20 text-center">REPS</th>
-                      <th className="py-3 px-2 w-28 text-center">CARGA (KG)</th>
-                      <th className="py-3 px-2 w-20 text-center">PAUSA</th>
-                      <th className="py-3 px-3 min-w-[220px]">OBSERVACIONES</th>
-                      <th className="py-3 px-2 w-28 text-center">ACCIONES</th>
+                      <th className="py-3 px-2 w-9 text-center">#</th>
+                      <th className="py-3 px-3 min-w-[190px]">EJERCICIO</th>
+                      {/* SERIES AMPLIAS */}
+                      <th className="py-3 px-2 w-24 sm:w-28 min-w-[85px] text-center">SERIES</th>
+                      {/* REPS AMPLIAS */}
+                      <th className="py-3 px-2 w-28 sm:w-36 min-w-[105px] text-center">REPS</th>
+                      <th className="py-2.5 px-1 w-16 text-center text-emerald-400" title="Carga P1 (Semana 1-2 / Fase Inicial)">
+                        <div className="flex flex-col items-center leading-none gap-0.5">
+                          <span className="font-bold text-[11px] font-mono">P1</span>
+                          <span className="text-[9px] text-slate-500 font-medium tracking-normal font-sans">CARGA</span>
+                        </div>
+                      </th>
+                      <th className="py-2.5 px-1 w-16 text-center text-emerald-400" title="Carga P2 (Semana 3-4 / Progresión)">
+                        <div className="flex flex-col items-center leading-none gap-0.5">
+                          <span className="font-bold text-[11px] font-mono">P2</span>
+                          <span className="text-[9px] text-slate-500 font-medium tracking-normal font-sans">CARGA</span>
+                        </div>
+                      </th>
+                      <th className="py-3 px-1.5 w-14 text-center">PAUSA</th>
+                      {/* OBSERVACIONES ACHICADAS */}
+                      <th className="py-3 px-2 w-28 sm:w-36 max-w-[130px]" title="Observaciones">OBS.</th>
+                      <th className="py-3 px-2 w-24 text-center">ACCIONES</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 font-mono">
                     {activeBlock.ejercicios.map((ej, rowIdx) => (
                       <tr key={ej.id} className="hover:bg-slate-900/60 transition group">
                         {/* # */}
-                        <td className="py-3 px-3 text-center text-slate-400 font-bold text-xs">
+                        <td className="py-3 px-2 text-center text-slate-400 font-bold text-xs">
                           {ej.orden || rowIdx + 1}
                         </td>
 
@@ -828,39 +869,52 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                           </div>
                         </td>
 
-                        {/* SERIES */}
-                        <td className="py-2.5 px-2 text-center">
+                        {/* SERIES (AMPLIO) */}
+                        <td className="py-2 px-1.5 sm:px-2 w-24 sm:w-28 text-center">
                           <input
                             type="text"
                             value={ej.series}
                             onChange={(e) => handleUpdateExercise(rowIdx, 'series', e.target.value)}
-                            className="w-full bg-transparent text-center font-bold text-white text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
+                            className="w-full bg-transparent text-center font-bold text-white text-xs sm:text-base font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
                           />
                         </td>
 
-                        {/* REPS */}
-                        <td className="py-2.5 px-2 text-center">
+                        {/* REPS (AMPLIO) */}
+                        <td className="py-2 px-1.5 sm:px-2 w-28 sm:w-36 text-center">
                           <input
                             type="text"
                             value={ej.repeticiones}
                             onChange={(e) => handleUpdateExercise(rowIdx, 'repeticiones', e.target.value)}
-                            className="w-full bg-transparent text-center font-bold text-white text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
+                            className="w-full bg-transparent text-center font-bold text-white text-xs sm:text-base font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
                           />
                         </td>
 
-                        {/* CARGA (KG) - Verde brillante como en la imagen */}
-                        <td className="py-2.5 px-2 text-center">
+                        {/* P1 (CARGA 1) */}
+                        <td className="py-2.5 px-1 text-center">
                           <input
                             type="text"
                             value={ej.carga || ''}
                             placeholder="-"
+                            title="Carga P1"
                             onChange={(e) => handleUpdateExercise(rowIdx, 'carga', e.target.value)}
                             className="w-full bg-transparent text-center font-bold text-emerald-400 text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
                           />
                         </td>
 
+                        {/* P2 (CARGA 2 / PROGRESIÓN) */}
+                        <td className="py-2.5 px-1 text-center">
+                          <input
+                            type="text"
+                            value={ej.carga_p2 || ''}
+                            placeholder="-"
+                            title="Carga P2 (Progresión)"
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'carga_p2', e.target.value)}
+                            className="w-full bg-transparent text-center font-bold text-emerald-400 text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
+                          />
+                        </td>
+
                         {/* PAUSA */}
-                        <td className="py-2.5 px-2 text-center">
+                        <td className="py-2.5 px-1.5 text-center">
                           <input
                             type="text"
                             value={ej.pausa}
@@ -869,14 +923,15 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                           />
                         </td>
 
-                        {/* OBSERVACIONES */}
-                        <td className="py-2.5 px-3">
+                        {/* OBSERVACIONES (ACHICADO Y SIN TEXTO RELLENO) */}
+                        <td className="py-2 px-1.5 sm:px-2 w-28 sm:w-36 max-w-[130px]">
                           <input
                             type="text"
-                            value={ej.observaciones_dosificacion}
+                            value={ej.observaciones_dosificacion || ''}
                             onChange={(e) => handleUpdateExercise(rowIdx, 'observaciones_dosificacion', e.target.value)}
-                            placeholder="Observaciones de dosificación..."
-                            className="w-full bg-transparent text-slate-300 text-xs font-sans focus:outline-none focus:bg-slate-900/80 px-2 py-1 rounded"
+                            placeholder="Notas..."
+                            title={ej.observaciones_dosificacion || 'Sin observaciones'}
+                            className="w-full bg-transparent text-slate-400 text-xs font-sans focus:outline-none focus:bg-slate-900/80 px-1 py-0.5 rounded truncate focus:truncate-none"
                           />
                         </td>
 
@@ -901,6 +956,24 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                             </button>
                             <button
                               type="button"
+                              onClick={() => handleMoveRow(rowIdx, 'up')}
+                              disabled={rowIdx === 0}
+                              className="p-1 rounded hover:text-white transition disabled:opacity-30 disabled:hover:text-slate-400"
+                              title="Subir orden"
+                            >
+                              <ArrowUp className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleMoveRow(rowIdx, 'down')}
+                              disabled={rowIdx === activeBlock.ejercicios.length - 1}
+                              className="p-1 rounded hover:text-white transition disabled:opacity-30 disabled:hover:text-slate-400"
+                              title="Bajar orden"
+                            >
+                              <ArrowDown className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio || `Ejercicio #${rowIdx + 1}` })}
                               className="p-1 rounded hover:text-rose-400 transition"
                               title="Eliminar"
@@ -915,7 +988,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                 </table>
               </div>
             ) : (
-              /* VISTA TARJETAS (Si el usuario presiona "Tarjetas") */
+              /* VISTA TARJETAS */
               <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
                 {activeBlock.ejercicios.map((ej, rowIdx) => (
                   <div
@@ -952,7 +1025,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                           <Copy className="w-3.5 h-3.5" />
                         </button>
                         <button
-                          onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio || `Ejercicio #${rowIdx + 1}` })}
+                          onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio })}
                           className="p-1 text-slate-400 hover:text-rose-400"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -960,49 +1033,59 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
-                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800">
+                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
+                      <div className=" rounded-lg bg-slate-900 border border-slate-800">
                         <span className="block text-[10px] text-slate-400 uppercase font-mono">Series</span>
                         <input
                           type="text"
                           value={ej.series}
                           onChange={(e) => handleUpdateExercise(rowIdx, 'series', e.target.value)}
-                          className="w-full text-center bg-transparent font-bold text-white focus:outline-none"
+                          className="w-full text-center bg-transparent font-bold text-white focus:outline-none text-xs sm:text-sm font-mono"
                         />
                       </div>
-                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800">
+                      <div className=" rounded-lg bg-slate-900 border border-slate-800">
                         <span className="block text-[10px] text-slate-400 uppercase font-mono">Reps</span>
                         <input
                           type="text"
                           value={ej.repeticiones}
                           onChange={(e) => handleUpdateExercise(rowIdx, 'repeticiones', e.target.value)}
-                          className="w-full text-center bg-transparent font-bold text-white focus:outline-none"
+                          className="w-full text-center bg-transparent font-bold text-white focus:outline-none text-xs sm:text-sm font-mono"
                         />
                       </div>
-                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800">
-                        <span className="block text-[10px] text-emerald-400 uppercase font-mono">Carga</span>
+                      <div className=" rounded-lg bg-slate-900 border border-slate-800">
+                        <span className="block text-[10px] text-emerald-400 uppercase font-mono">P1 (Carga)</span>
                         <input
                           type="text"
                           value={ej.carga || ''}
                           placeholder="-"
                           onChange={(e) => handleUpdateExercise(rowIdx, 'carga', e.target.value)}
-                          className="w-full text-center bg-transparent font-bold text-emerald-400 focus:outline-none"
+                          className="w-full text-center bg-transparent font-bold text-emerald-400 focus:outline-none text-xs sm:text-sm font-mono"
                         />
                       </div>
-                      <div className="p-1.5 rounded-lg bg-slate-900 border border-slate-800">
+                      <div className=" rounded-lg bg-slate-900 border border-slate-800">
+                        <span className="block text-[10px] text-emerald-400 uppercase font-mono">P2 (Carga)</span>
+                        <input
+                          type="text"
+                          value={ej.carga_p2 || ''}
+                          placeholder="-"
+                          onChange={(e) => handleUpdateExercise(rowIdx, 'carga_p2', e.target.value)}
+                          className="w-full text-center bg-transparent font-bold text-emerald-400 focus:outline-none text-xs sm:text-sm font-mono"
+                        />
+                      </div>
+                      <div className=" rounded-lg bg-slate-900 border border-slate-800 col-span-2 sm:col-span-1">
                         <span className="block text-[10px] text-slate-400 uppercase font-mono">Pausa</span>
                         <input
                           type="text"
                           value={ej.pausa}
                           onChange={(e) => handleUpdateExercise(rowIdx, 'pausa', e.target.value)}
-                          className="w-full text-center bg-transparent font-bold text-slate-200 focus:outline-none"
+                          className="w-full text-center bg-transparent font-bold text-slate-200 focus:outline-none text-xs sm:text-sm font-mono"
                         />
                       </div>
                     </div>
 
                     <input
                       type="text"
-                      value={ej.observaciones_dosificacion}
+                      value={ej.observaciones_dosificacion || ''}
                       onChange={(e) => handleUpdateExercise(rowIdx, 'observaciones_dosificacion', e.target.value)}
                       placeholder="Observaciones de dosificación..."
                       className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-300 focus:outline-none"
@@ -1012,7 +1095,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               </div>
             )}
 
-            {/* BOTÓN ANCHO: + Agregar Ejercicio al Día EXACTO COMO EN LA IMAGEN */}
+            {/* BOTÓN ANCHO: + Agregar Ejercicio al Día */}
             <div className="p-3 border-t border-slate-800/80 bg-slate-950/40">
               <button
                 type="button"
@@ -1138,7 +1221,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               </button>
             </div>
 
-            {/* Buscador */}
+            {/* Filter Search Input */}
             <div className="p-4 border-b border-slate-800 bg-slate-950/60 shrink-0">
               <div className="relative">
                 <input
@@ -1151,7 +1234,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               </div>
             </div>
 
-            {/* Lista de ejercicios */}
+            {/* Exercises List */}
             <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
               {filteredLibrary.map((libEx, idx) => (
                 <div
@@ -1278,5 +1361,3 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     </div>
   );
 };
-
-export default RoutineSpreadsheet;
