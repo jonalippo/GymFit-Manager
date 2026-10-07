@@ -122,30 +122,39 @@ export const GroupManager: React.FC<GroupManagerProps> = ({
 
   return (
     <div className="w-full max-w-full space-y-5 pb-24 overflow-x-hidden">
-      {/* Top Action Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/90 border border-slate-800 p-3 sm:p-4 rounded-2xl shadow-sm">
-        <div className="flex items-center gap-3 min-w-0">
-          <button
-            onClick={onBackToAlumnos}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 text-xs font-bold transition shrink-0 active:scale-95 group shadow-sm"
-          >
-            <ArrowLeft className="w-4 h-4 text-emerald-400 group-hover:-translate-x-1 transition-transform" />
-            <span>Volver a Alumnos</span>
-          </button>
-          <div className="min-w-0">
-            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight flex items-center gap-2">
-              <Layers className="w-5 h-5 text-emerald-400" />
-              <span>Gestión de Grupos de Entrenamiento</span>
+      {/* Componente 1: Barra superior de navegación / retorno separada */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={onBackToAlumnos}
+          className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-bold transition-all shadow-sm active:scale-95 group"
+        >
+          <ArrowLeft className="w-4 h-4 text-emerald-400 group-hover:-translate-x-1 transition-transform" />
+          <span>Volver a Alumnos</span>
+        </button>
+        <span className="text-xs text-slate-500 font-mono hidden sm:inline">
+          {grupos.length} grupos configurados
+        </span>
+      </div>
+
+      {/* Componente 2: Cabecera de Gestión de Grupos */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3.5 bg-slate-900/90 border border-slate-800 p-4 sm:p-5 rounded-2xl shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
+              Gestión de Grupos de Entrenamiento
             </h2>
             <p className="text-xs text-slate-400">
-              Edita nombres, horarios y consulta los alumnos asignados a cada grupo.
+              Edita nombres, turnos, horarios y consulta los alumnos asignados a cada grupo.
             </p>
           </div>
         </div>
 
         <button
           onClick={openCreateModal}
-          className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md shadow-emerald-950/50 flex items-center justify-center gap-2 active:scale-95 transition"
+          className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs shadow-md shadow-emerald-950/50 flex items-center justify-center gap-2 active:scale-95 transition shrink-0"
         >
           <FolderPlus className="w-4 h-4" />
           <span>Nuevo Grupo</span>

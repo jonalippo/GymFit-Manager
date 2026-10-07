@@ -135,6 +135,7 @@ export interface Alumno {
   fecha_pago_cuota?: string; // Fecha en que abonó YYYY-MM-DD
   fecha_vencimiento_cuota?: string; // Fecha de vencimiento a mes completo YYYY-MM-DD
   cuota_al_dia?: boolean; // Estado de la cuota: true (activo/al día), false (debe)
+  ultimo_monto_pago?: number;
 
   // Estado Biomecánico & Dolor
   alerta_lesion_activa?: string;
@@ -210,4 +211,19 @@ export interface LibraryExercise {
   musculos_principales: string;
   precaucion_clinica?: string;
   ajuste_biomecanico_sugerido: string;
+}
+
+export interface PagoCuota {
+  id: string;
+  alumno_id: string;
+  alumno_nombre: string;
+  grupo_id?: string;
+  grupo_nombre?: string;
+  monto: number;
+  fecha_pago: string; // YYYY-MM-DD
+  fecha_vencimiento: string; // YYYY-MM-DD
+  mes_correspondiente: string; // YYYY-MM
+  metodo_pago?: string; // 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
+  notas?: string;
+  created_at: string;
 }

@@ -1,5 +1,5 @@
 -- ==============================================================================
--- GYMFITPRO MANAGER - ESQUEMA SAAS MULTI-TENANT & POLÍTICAS RLS (SUPABASE / POSTGRESQL)
+-- GYMFIT MANAGER - ESQUEMA SAAS MULTI-TENANT & POLÍTICAS RLS (SUPABASE / POSTGRESQL)
 -- Arquitectura de Demanda vs. Capacidad vs. Respuesta & Historial Clínico
 -- Cumplimiento GDPR / HIPAA: Cifrado en reposo, Aislamiento RLS por Tenant y Cero Fuga
 -- ==============================================================================

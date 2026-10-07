@@ -52,11 +52,8 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, defaultEmail = 
           </div>
 
           <h1 className="font-display text-2xl sm:text-3xl font-black text-white tracking-tight pt-1">
-            GymFitPro <span className="text-emerald-400">Manager</span>
+            GymFit <span className="text-emerald-400">Manager</span>
           </h1>
-          <p className="text-xs sm:text-sm text-slate-400 font-medium max-w-xs mx-auto">
-            Plataforma SaaS de Prescripción Biomecánica & Gestión de Sala de Musculación
-          </p>
         </div>
 
         {/* Auth Card */}

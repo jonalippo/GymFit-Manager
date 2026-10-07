@@ -18,7 +18,7 @@ export function buildRoutinePDF(alumno: Alumno, rutina: Rutina, evaluacion?: Eva
   doc.setTextColor(16, 185, 129);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(16);
-  doc.text('GYMFITPRO MANAGER', 14, 12);
+  doc.text('GYMFIT MANAGER', 14, 12);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
@@ -159,7 +159,7 @@ export function buildRoutinePDF(alumno: Alumno, rutina: Rutina, evaluacion?: Eva
     doc.setFontSize(7);
     doc.setTextColor(148, 163, 184);
     doc.text(
-      `GymFitPro Manager · Documento de Prescripción · Página ${i} de ${totalPages} · Confidencial`,
+      `GymFit Manager · Documento de Prescripción · Página ${i} de ${totalPages} · Confidencial`,
       pageWidth / 2,
       290,
       { align: 'center' }
@@ -186,7 +186,7 @@ export function shareRoutineViaWhatsApp(
   doc.save(filename);
 
   // 2. Mensaje limpio y profesional con los datos del alumno y de la rutina
-  let message = `*GYMFITPRO MANAGER - PLAN DE ENTRENAMIENTO*\n`;
+  let message = `*GYMFIT MANAGER - PLAN DE ENTRENAMIENTO*\n`;
   message += `👤 *Alumno:* ${alumno.nombre} ${alumno.apellido}\n`;
   message += `📋 *Rutina:* ${rutina.nombre_rutina}\n`;
   message += `📅 *Vigencia:* ${rutina.fecha_inicio} al ${rutina.fecha_cambio}\n`;
@@ -200,7 +200,7 @@ export function shareRoutineViaWhatsApp(
   }
 
   message += `\n📄 *Rutina en PDF:* Te comparto adjunto el archivo PDF con tu planificación completa, series, repeticiones, cargas y descansos para que puedas consultarla o imprimirla.\n`;
-  message += `\n_Emitido con GymFitPro Manager · Control de Demanda vs. Capacidad_`;
+  message += `\n_Emitido con GymFit Manager · Control de Demanda vs. Capacidad_`;
 
   const phone = alumno.telefono ? alumno.telefono.replace(/[^0-9]/g, '') : '';
   const encodedText = encodeURIComponent(message);

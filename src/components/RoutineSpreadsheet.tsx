@@ -672,7 +672,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               className="px-3.5 py-2 rounded-xl border border-dashed border-slate-700 bg-slate-950/60 hover:bg-slate-900 hover:border-emerald-500 text-slate-300 hover:text-emerald-400 text-xs font-bold flex items-center gap-1.5 transition active:scale-95"
             >
               <Plus className="w-3.5 h-3.5 text-emerald-400" />
-              <span>+ Nuevo Día</span>
+              <span>Nuevo Día</span>
             </button>
           </div>
         </div>

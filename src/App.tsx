@@ -27,6 +27,7 @@ import { ClinicalEvaluationModal } from './components/ClinicalEvaluationModal';
 import { DailyTrackingModal } from './components/DailyTrackingModal';
 import { AuthScreen } from './components/AuthScreen';
 import { SupabaseSqlModal } from './components/SupabaseSqlModal';
+import { PaymentsManager } from './components/PaymentsManager';
 import {
   isSupabaseConfigured,
   fetchStudentsFromSupabase,
@@ -50,9 +51,25 @@ import {
   ChevronRight,
   Brain,
   Layers,
+  DollarSign,
   LogOut,
   X
 } from 'lucide-react';
+
+export interface PagoCuota {
+  id: string;
+  alumno_id: string;
+  alumno_nombre: string;
+  grupo_id?: string;
+  grupo_nombre?: string;
+  monto: number;
+  fecha_pago: string;
+  fecha_vencimiento: string;
+  mes_correspondiente: string;
+  metodo_pago?: string;
+  notas?: string;
+  created_at: string;
+}
 
 interface AuthUser {
   name: string;
@@ -63,7 +80,7 @@ interface AuthUser {
 export default function App() {
   const [loading, setLoading] = useState(true);
 
-  // Authentication State (Saved to localStorage)
+  // Authentication State: Inicia siempre desde Login al recargar la app
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
     try {
       const saved = localStorage.getItem('fitpro_auth_user');
@@ -75,13 +92,48 @@ export default function App() {
 
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
   const [grupos, setGrupos] = useState<Grupo[]>([]);
+  
+  // Pagos en memoria y persistencia local sin requerir cambios en indexedDb
+  const [pagos, setPagos] = useState<PagoCuota[]>(() => {
+    try {
+      const saved = localStorage.getItem('fitpro_local_pagos');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
-  // Modo Sala: Active Athletes pinned to bottom dock (up to 8)
+  // Modo Sala: Atletas fijados en el dock inferior (hasta 8)
   const [activeDockStudents, setActiveDockStudents] = useState<Alumno[]>([]);
 
-  // Navigation View
-  const [activeView, setActiveView] = useState<'alumnos' | 'grupos' | 'rutina' | 'evaluacion'>('alumnos');
+  // Navigation View (Alumnos, Grupos, Pagos, Rutina, Evaluacion)
+  const [activeView, setActiveView] = useState<'alumnos' | 'grupos' | 'pagos' | 'rutina' | 'evaluacion'>(() => {
+    try {
+      const saved = localStorage.getItem('fitpro_active_view');
+      if (saved && ['alumnos', 'grupos', 'pagos', 'rutina', 'evaluacion'].includes(saved)) {
+        return saved as any;
+      }
+    } catch {}
+    return 'alumnos';
+  });
+
+  // Guarda automáticamente la pantalla actual al navegar
+  useEffect(() => {
+    try {
+      localStorage.setItem('fitpro_active_view', activeView);
+    } catch {}
+  }, [activeView]);
+
+  // Recuerda el alumno seleccionado al recargar
+  useEffect(() => {
+    try {
+      if (selectedStudentId) {
+        localStorage.setItem('fitpro_selected_student_id', selectedStudentId);
+      }
+    } catch {}
+  }, [selectedStudentId]);
 
   // Selected Student Routines & Evaluation
   const [currentRutinas, setCurrentRutinas] = useState<Rutina[]>([]);
@@ -101,7 +153,8 @@ export default function App() {
   const [dailyLogStudent, setDailyLogStudent] = useState<Alumno | null>(null);
   const initialCloudSyncDone = React.useRef(false);
 
-  // Real-time toast feedback
+  // Cloud connection status & real-time toast feedback
+  const [isCloudConnected, setIsCloudConnected] = useState(() => isSupabaseConfigured());
   const [toastMessage, setToastMessage] = useState<{
     type: 'success' | 'error' | 'warning' | 'info';
     text: string;
@@ -133,7 +186,6 @@ export default function App() {
             setAlumnos(cloudAlumnos);
             for (const a of cloudAlumnos) {
               await saveAlumno(a);
-              // Traer las rutinas de la nube para este alumno
               const cloudRuts = await fetchRoutinesFromSupabase(a.id);
               if (cloudRuts && cloudRuts.length > 0) {
                 for (const r of cloudRuts) {
@@ -155,7 +207,7 @@ export default function App() {
         }
       }
 
-      // Pre-cargar rutinas en memoria caché para evitar pantallas en blanco al navegar entre alumnos
+      // Pre-cargar rutinas en memoria caché
       const routinesCacheMap: Record<string, Rutina[]> = {};
       await Promise.all(
         allAlumnos.map(async (a) => {
@@ -184,14 +236,11 @@ export default function App() {
         setActiveDockStudents((prev) =>
           prev.map((docAlm) => allAlumnos.find((a) => a.id === docAlm.id) || docAlm)
         );
-        const ruts = routinesCacheMap[selectedStudentId] || (await getRutinasByAlumno(selectedStudentId));
-        const ev = await getEvaluacionClinica(selectedStudentId);
-        setCurrentRutinas(ruts);
-        setCurrentEvaluacion(ev);
       }
+
+      setLoading(false);
     } catch (err) {
-      console.error('Error loading DB data', err);
-    } finally {
+      console.error('Failed to load local DB:', err);
       setLoading(false);
     }
   }, [selectedStudentId]);
@@ -199,71 +248,34 @@ export default function App() {
   useEffect(() => {
     loadData();
     const unsubscribe = subscribeToDBChanges(() => {
-      if (!isSavingRef.current) {
-        loadData();
-      }
+      loadData();
     });
     return () => unsubscribe();
   }, [loadData]);
 
-  // Load routines & clinical evaluation whenever selected student changes
-  useEffect(() => {
-    if (!selectedStudentId) return;
-
-    let isMounted = true;
-    Promise.all([
-      getRutinasByAlumno(selectedStudentId),
-      getEvaluacionClinica(selectedStudentId)
-    ]).then(async ([ruts, ev]) => {
-      if (isMounted) {
-        let finalRuts = ruts;
-        if (finalRuts.length === 0 && isSupabaseConfigured()) {
-          const cloudRuts = await fetchRoutinesFromSupabase(selectedStudentId);
-          if (cloudRuts && cloudRuts.length > 0) {
-            finalRuts = cloudRuts;
-            for (const r of cloudRuts) {
-              await saveRutina(r);
-            }
-          }
-        }
-        if (finalRuts.length === 0) {
-          const newRoutine = await handleCreateNewRoutine(selectedStudentId);
-          if (isMounted) {
-            setCurrentRutinas([newRoutine]);
-          }
-        } else {
-          setCurrentRutinas(finalRuts);
-        }
-        setCurrentEvaluacion(ev);
-      }
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [selectedStudentId]);
-
-  const selectedStudent = alumnos.find((a) => a.id === selectedStudentId) || alumnos[0];
-
-  // Auth Handlers
-  const handleLogin = (userData: AuthUser) => {
-    setCurrentUser(userData);
-    localStorage.setItem('fitpro_auth_user', JSON.stringify(userData));
+  const handleLogin = (user: AuthUser) => {
+    setCurrentUser(user);
+    try {
+      localStorage.setItem('fitpro_auth_user', JSON.stringify(user));
+    } catch {}
+    showToast('success', `Bienvenido, ${user.name}`);
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
-    localStorage.removeItem('fitpro_auth_user');
+    try {
+      localStorage.removeItem('fitpro_auth_user');
+      localStorage.removeItem('fitpro_active_view');
+      localStorage.removeItem('fitpro_selected_student_id');
+    } catch {}
+    showToast('info', 'Sesión cerrada');
   };
 
-  // Handlers for Selecting & Docking Students
-  const handleSelectStudent = (alumno: Alumno, targetView: 'rutina' | 'evaluacion' = 'rutina') => {
-    setSelectedStudentId(alumno.id);
-    setActiveView(targetView);
+  const selectedStudent = alumnos.find((a) => a.id === selectedStudentId) || null;
 
-    if (routinesByStudent[alumno.id] && routinesByStudent[alumno.id].length > 0) {
-      setCurrentRutinas(routinesByStudent[alumno.id]);
-    }
+  const handleSelectStudent = async (alumno: Alumno, view: 'rutina' | 'evaluacion') => {
+    setSelectedStudentId(alumno.id);
+    setActiveView(view);
 
     if (!activeDockStudents.some((a) => a.id === alumno.id)) {
       if (activeDockStudents.length < 8) {
@@ -272,10 +284,24 @@ export default function App() {
         setActiveDockStudents((prev) => [...prev.slice(1), alumno]);
       }
     }
+
+    // Carga de rutinas y evaluación
+    try {
+      const [ruts, evalClinica] = await Promise.all([
+        getRutinasByAlumno(alumno.id),
+        getEvaluacionClinica(alumno.id)
+      ]);
+      setCurrentRutinas(ruts);
+      setCurrentEvaluacion(evalClinica);
+      setRoutinesByStudent((prev) => ({ ...prev, [alumno.id]: ruts }));
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleToggleDock = (alumno: Alumno) => {
-    if (activeDockStudents.some((a) => a.id === alumno.id)) {
+    const isDocked = activeDockStudents.some((a) => a.id === alumno.id);
+    if (isDocked) {
       setActiveDockStudents((prev) => prev.filter((a) => a.id !== alumno.id));
     } else {
       if (activeDockStudents.length < 8) {
@@ -363,10 +389,8 @@ export default function App() {
         return [...prev, rutina];
       });
 
-      // Guardar local
       await saveRutina(rutina);
 
-      // Guardar en Supabase
       if (isSupabaseConfigured()) {
         saveRoutineToSupabase(rutina).catch((err) => console.warn('[Supabase]', err));
       }
@@ -406,19 +430,17 @@ export default function App() {
     };
     await saveAlumno(created);
 
-    // Guardar primero en Supabase para satisfacer la clave foránea en rutinas
     if (isSupabaseConfigured()) {
       const res = await saveStudentToSupabase(created);
       if (res.success) {
-        showToast('success', `✓ Alumno "${created.nombre} ${created.apellido}" guardado y sincronizado en Supabase`);
+        showToast('success', `✓ Alumno "${created.nombre} ${created.apellido}" guardado y sincronizado`);
       } else {
-        showToast('error', `⚠️ Guardado en este dispositivo, pero falló en Supabase: ${res.error || 'Error de red'}`);
+        showToast('error', `⚠️ Guardado localmente, error en nube: ${res.error || 'Error'}`);
       }
     } else {
-      showToast('warning', `ℹ️ Alumno guardado solo localmente. Supabase no está conectado.`);
+      showToast('success', `Alumno guardado en este dispositivo`);
     }
 
-    // Crear rutina dedicada para este nuevo alumno
     const newRoutine = await handleCreateNewRoutine(created.id);
     setRoutinesByStudent((prev) => ({ ...prev, [created.id]: [newRoutine] }));
     setCurrentRutinas([newRoutine]);
@@ -432,9 +454,9 @@ export default function App() {
     if (isSupabaseConfigured()) {
       const res = await saveStudentToSupabase(updatedAlumno);
       if (res.success) {
-        showToast('success', `✓ Alumno "${updatedAlumno.nombre}" actualizado en Supabase`);
+        showToast('success', `✓ Alumno "${updatedAlumno.nombre}" actualizado`);
       } else {
-        showToast('error', `⚠️ Guardado localmente, pero error en Supabase: ${res.error || 'Error'}`);
+        showToast('error', `⚠️ Error en Supabase: ${res.error || 'Error'}`);
       }
     }
     await loadData();
@@ -530,18 +552,67 @@ export default function App() {
     }
   };
 
+  // Payment Handlers (Guarda en localStorage y actualiza el alumno)
+  const handleSavePayment = async (pagoData: Omit<PagoCuota, 'id' | 'created_at'>) => {
+    try {
+      const newPago: PagoCuota = {
+        ...pagoData,
+        id: `pago-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        created_at: new Date().toISOString(),
+      };
+
+      setPagos((prev) => {
+        const updated = [newPago, ...prev.filter((p) => p.id !== newPago.id)];
+        try {
+          localStorage.setItem('fitpro_local_pagos', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+
+      const target = alumnos.find((a) => a.id === pagoData.alumno_id);
+      if (target) {
+        const updatedAlumno: Alumno = {
+          ...target,
+          fecha_pago_cuota: pagoData.fecha_pago,
+          fecha_vencimiento_cuota: pagoData.fecha_vencimiento,
+          cuota_al_dia: true,
+          ultimo_monto_pago: pagoData.monto,
+          updated_at: new Date().toISOString(),
+        };
+        await handleEditStudent(updatedAlumno);
+      }
+
+      showToast('success', `Pago de $${pagoData.monto} registrado exitosamente`);
+    } catch (err) {
+      console.error('Error registrando pago:', err);
+      showToast('error', 'Error al registrar el pago');
+    }
+  };
+
+  const handleDeletePayment = async (pagoId: string) => {
+    setPagos((prev) => {
+      const updated = prev.filter((p) => p.id !== pagoId);
+      try {
+        localStorage.setItem('fitpro_local_pagos', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+    showToast('info', 'Pago anulado correctamente');
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-[#090D16] flex items-center justify-center text-slate-300">
         <div className="flex flex-col items-center gap-3">
           <div className="w-10 h-10 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
           <p className="font-display font-bold text-white text-base">Iniciando FitPro Manager...</p>
-          <span className="text-xs text-slate-500 font-mono">Cargando base de datos IndexedDB offline</span>
+          <span className="text-xs text-slate-500 font-mono">Cargando base de datos local</span>
         </div>
       </div>
     );
   }
 
+  // Si no hay usuario autenticado, muestra la pantalla de login
   if (!currentUser) {
     return <AuthScreen onLogin={handleLogin} defaultEmail="jonalippo@gmail.com" />;
   }
@@ -555,33 +626,13 @@ export default function App() {
         userName={currentUser.name}
         onLogout={handleLogout}
         onOpenSupabaseModal={() => setIsSupabaseModalOpen(true)}
+        isCloudConnected={isCloudConnected}
       />
 
       {/* Main Viewport Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 pt-5 pb-24 overflow-x-hidden">
-        {/* Mobile user status and logout bar */}
-        <div className="md:hidden flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs mb-3 shadow-sm">
-          <div className="flex items-center gap-2 min-w-0">
-            <div className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-center text-[10px] shrink-0">
-              {currentUser.name.charAt(0)}
-            </div>
-            <div className="min-w-0">
-              <p className="text-white font-bold text-xs truncate leading-tight">{currentUser.name}</p>
-              <p className="text-[10px] text-emerald-400 font-mono leading-none">Profesor Titular</p>
-            </div>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="px-2.5 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-900 border border-rose-800/80 text-rose-200 text-[11px] font-bold flex items-center gap-1 shrink-0 active:scale-95 transition"
-            title="Cerrar sesión"
-          >
-            <LogOut className="w-3 h-3 text-rose-400" />
-            <span>Cerrar Sesión</span>
-          </button>
-        </div>
-
         {/* Mobile quick tabs */}
-        <div className="md:hidden flex items-center gap-1.5 mb-4 p-1 rounded-2xl bg-slate-900 border border-slate-800 text-xs">
+        <div className="md:hidden flex items-center gap-1.5 mb-4 p-1 rounded-2xl bg-slate-900 border border-slate-800 text-xs shadow-sm">
           <button
             onClick={() => setActiveView('alumnos')}
             className={`flex-1 py-2 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
@@ -600,17 +651,18 @@ export default function App() {
             <Layers className="w-3.5 h-3.5" />
             <span>Grupos</span>
           </button>
-          {selectedStudent && activeView === 'rutina' && (
-            <button
-              onClick={() => setActiveView('rutina')}
-              className="flex-1 py-2 rounded-xl font-bold transition bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 truncate px-2"
-            >
-              Rutina: {selectedStudent.nombre}
-            </button>
-          )}
+          <button
+            onClick={() => setActiveView('pagos')}
+            className={`flex-1 py-2 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+              activeView === 'pagos' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <DollarSign className="w-3.5 h-3.5" />
+            <span>Pagos</span>
+          </button>
         </div>
 
-        {/* View 1: Alumnos Directory */}
+        {/* View 1: Alumnos Directory & Gym Floor Hub */}
         {activeView === 'alumnos' && (
           <StudentList
             alumnos={alumnos}
@@ -632,7 +684,7 @@ export default function App() {
           />
         )}
 
-        {/* View 2: Grupos Management */}
+        {/* View 2: Grupos & Turnos Management */}
         {activeView === 'grupos' && (
           <GroupManager
             grupos={grupos}
@@ -646,7 +698,7 @@ export default function App() {
           />
         )}
 
-        {/* View 3: Rutina Spreadsheet */}
+        {/* View 3: Rutina Interactive Spreadsheet */}
         {activeView === 'rutina' && (
           <div>
             {activeDockStudents.map((dockAlm) => {
@@ -709,7 +761,7 @@ export default function App() {
           </div>
         )}
 
-        {/* View 4: Evaluación Clínica */}
+        {/* View 4: Evaluación Clínica "El Iceberg" */}
         {activeView === 'evaluacion' && selectedStudent && (
           <div className="space-y-4 pb-24">
             <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/60 border border-slate-800/80 px-3.5 py-2.5 rounded-2xl">
@@ -820,7 +872,6 @@ export default function App() {
                   </div>
                   <p><strong className="text-slate-300">Lesiones Previas:</strong> {currentEvaluacion.lesiones_previas}</p>
                   <p><strong className="text-slate-300">Movilidad Articular:</strong> {currentEvaluacion.movilidad_articular}</p>
-                  <p><strong className="text-slate-300">Control Cadena:</strong> CCC: <span className="text-emerald-400 font-semibold">{currentEvaluacion.control_motor_cadena.ccc_score}</span> · CCA: <span className="text-blue-400 font-semibold">{currentEvaluacion.control_motor_cadena.cca_score}</span></p>
                   <p><strong className="text-slate-300">Sueño & Estrés:</strong> Sueño {currentEvaluacion.calidad_sueno}/5 · Estrés {currentEvaluacion.nivel_estres}/10</p>
                   <p><strong className="text-slate-300">Kinesiofobia:</strong> {currentEvaluacion.kinesiofobia_nivel}</p>
                   <p><strong className="text-slate-300">Barreras / Adherencia:</strong> {currentEvaluacion.expectativas_barreras}</p>
@@ -839,6 +890,17 @@ export default function App() {
             )}
           </div>
         )}
+
+        {/* View 5: Pantalla de Pagos & Métricas Financieras */}
+        {activeView === 'pagos' && (
+          <PaymentsManager
+            alumnos={alumnos}
+            grupos={grupos}
+            pagos={pagos}
+            onSavePayment={handleSavePayment}
+            onDeletePayment={handleDeletePayment}
+          />
+        )}
       </main>
 
       {/* Modo Sala: Fixed Bottom Dock */}
@@ -852,7 +914,7 @@ export default function App() {
         onOpenStudentDirectory={() => setActiveView('alumnos')}
       />
 
-      {/* Daily Session Log Modal */}
+      {/* Daily Session Log Modal (RPE & EVA) */}
       {dailyLogStudent && (
         <DailyTrackingModal
           alumno={dailyLogStudent}
@@ -874,38 +936,46 @@ export default function App() {
           evaluacionActual={currentEvaluacion}
           isOpen={isEvalModalOpen}
           onClose={() => setIsEvalModalOpen(false)}
-          onSaveEvaluacion={handleSaveEvaluacion}
+          onSaveEvaluacion={async (evalData: EvaluacionClinica) => {
+            await handleSaveEvaluacion(evalData);
+            setIsEvalModalOpen(false);
+            showToast('success', 'Evaluación guardada');
+          }}
         />
       )}
 
-      {/* Supabase Architecture & SQL Script Modal */}
-      <SupabaseSqlModal
-        isOpen={isSupabaseModalOpen}
-        onClose={() => setIsSupabaseModalOpen(false)}
-      />
+      {/* Supabase SQL Config Modal */}
+      {isSupabaseModalOpen && (
+        <SupabaseSqlModal
+          isOpen={isSupabaseModalOpen}
+          onClose={() => {
+            setIsSupabaseModalOpen(false);
+            setIsCloudConnected(isSupabaseConfigured());
+          }}
+        />
+      )}
 
-      {/* Real-time sync feedback toast */}
+      {/* Toast Feedback */}
       {toastMessage && (
-        <div className="fixed top-14 right-3 sm:right-6 z-50 max-w-sm sm:max-w-md animate-in fade-in slide-in-from-top-2 duration-200">
-          <div
-            className={`px-4 py-3 rounded-2xl shadow-2xl border text-xs flex items-center gap-2.5 backdrop-blur-md ${
+        <div className="fixed bottom-20 right-4 z-50 flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-slate-900/95 border border-slate-800 text-white text-xs font-semibold shadow-2xl backdrop-blur animate-in slide-in-from-bottom-2">
+          <span
+            className={`w-2 h-2 rounded-full ${
               toastMessage.type === 'success'
-                ? 'bg-emerald-950/95 border-emerald-500/70 text-emerald-100 shadow-emerald-950/60'
+                ? 'bg-emerald-400'
                 : toastMessage.type === 'error'
-                ? 'bg-rose-950/95 border-rose-500/70 text-rose-100 shadow-rose-950/60'
+                ? 'bg-rose-400'
                 : toastMessage.type === 'warning'
-                ? 'bg-amber-950/95 border-amber-500/70 text-amber-100 shadow-amber-950/60'
-                : 'bg-slate-900/95 border-slate-700 text-slate-100'
+                ? 'bg-amber-400'
+                : 'bg-blue-400'
             }`}
+          />
+          <span>{toastMessage.text}</span>
+          <button
+            onClick={() => setToastMessage(null)}
+            className="ml-2 text-slate-400 hover:text-white"
           >
-            <div className="flex-1 font-medium leading-snug">{toastMessage.text}</div>
-            <button
-              onClick={() => setToastMessage(null)}
-              className="p-1 rounded-lg hover:bg-white/10 text-slate-300 hover:text-white shrink-0"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
-          </div>
+            <X className="w-3.5 h-3.5" />
+          </button>
         </div>
       )}
     </div>

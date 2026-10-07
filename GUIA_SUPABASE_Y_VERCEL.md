@@ -35,7 +35,7 @@ Supabase te proporciona la base de datos PostgreSQL, autenticación de usuarios 
 1. Ingresa a [supabase.com](https://supabase.com/) e inicia sesión con GitHub o tu correo.
 2. Haz clic en **"New Project"**.
 3. Completa los datos:
-   - **Name**: `gymfitpro-manager` (o el nombre de tu gimnasio).
+   - **Name**: `gymfit-manager` (o el nombre de tu gimnasio).
    - **Database Password**: Genera una contraseña segura y **anótala**.
    - **Region**: Selecciona la región más cercana a tus usuarios (por ejemplo, `South America (São Paulo) - sa-east-1`).
    - **Pricing Plan**: Free tier (100% gratuito).
