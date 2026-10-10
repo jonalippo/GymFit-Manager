@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Alumno, Rutina, BloqueRutina, EjercicioRutina, EvaluacionClinica, LibraryExercise } from '../types';
 import { EXERCISE_LIBRARY } from '../data/exerciseLibrary';
 import { exportRoutineToPDF, shareRoutineViaWhatsApp } from '../utils/exportUtils';
+import { sortRoutineBloquesAndEjercicios } from '../db/indexedDb';
 import {
   FileDown,
   Share2,
@@ -20,7 +21,8 @@ import {
   Settings,
   Table as TableIcon,
   LayoutGrid,
-  AlertTriangle
+  AlertTriangle,
+  Minus
 } from 'lucide-react';
 
 interface RoutineSpreadsheetProps {
@@ -55,10 +57,10 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
   onBackToAlumnos,
   onSwitchStudent,
 }) => {
-  // Filter routines strictly belonging to this student
-  const studentRoutines = rutinas.filter((r) => r.alumno_id === alumno.id);
+  // Filtrar rutinas pertenecientes a este alumno
+  const studentRoutines = rutinas.filter((r) => String(r.alumno_id) === String(alumno.id));
 
-  // Active Routine con persistencia por alumno
+  // Rutina activa inicial
   const [activeRoutineId, setActiveRoutineId] = useState<string>(() => {
     if (savedActiveRoutineId && studentRoutines.some((r) => r.id === savedActiveRoutineId)) {
       return savedActiveRoutineId;
@@ -72,23 +74,71 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     return studentRoutines.find((r) => r.activa)?.id || studentRoutines[0]?.id || '';
   });
 
-  const currentRoutine = studentRoutines.find((r) => r.id === activeRoutineId) || studentRoutines[0] || null;
+  const initialTarget =
+    studentRoutines.find((r) => r.id === activeRoutineId) ||
+    studentRoutines.find((r) => r.activa) ||
+    studentRoutines[0] ||
+    null;
 
-  // Active Day / Block con persistencia por alumno (recuerda si estabas en Día 2, Día 3, etc.)
+  // Estado local único y autoritativo de la rutina actual
+  const [localRoutine, setLocalRoutine] = useState<Rutina | null>(() => {
+    return initialTarget ? sortRoutineBloquesAndEjercicios(initialTarget) : null;
+  });
+
+  // Bloque / Día activo con persistencia (Día 1, Día 2, Día 3...)
   const [activeBlockId, setActiveBlockId] = useState<string>(() => {
-    if (savedActiveBlockId && currentRoutine?.bloques.some((b) => b.id === savedActiveBlockId)) {
+    const candidateRoutine = initialTarget;
+    if (savedActiveBlockId && candidateRoutine?.bloques.some((b) => b.id === savedActiveBlockId)) {
       return savedActiveBlockId;
     }
     try {
       const saved = localStorage.getItem(`fitpro_active_block_${alumno.id}`);
-      if (saved && currentRoutine?.bloques.some((b) => b.id === saved)) {
+      if (saved && candidateRoutine?.bloques.some((b) => b.id === saved)) {
         return saved;
       }
     } catch {}
-    return currentRoutine?.bloques[0]?.id || '';
+    return candidateRoutine?.bloques[0]?.id || '';
   });
 
-  // Guardar y notificar cambio de día / bloque para no perder la posición al cambiar pestañas
+  // Sincronizar ÚNICAMENTE cuando no hay rutina cargada o cuando cambia el alumno
+  useEffect(() => {
+    const validRoutines = rutinas.filter((r) => String(r.alumno_id) === String(alumno.id));
+    if (validRoutines.length === 0) {
+      if (!localRoutine) {
+        setActiveRoutineId('');
+        setActiveBlockId('');
+      }
+      return;
+    }
+
+    // Solo inicializar si no hay rutina local o si la rutina local pertenece a OTRO alumno
+    if (!localRoutine || String(localRoutine.alumno_id) !== String(alumno.id)) {
+      const target =
+        validRoutines.find((r) => r.id === activeRoutineId) ||
+        validRoutines.find((r) => r.activa) ||
+        validRoutines[0];
+
+      if (target) {
+        const sorted = sortRoutineBloquesAndEjercicios(target);
+        setActiveRoutineId(sorted.id);
+        setLocalRoutine(sorted);
+        setEditRoutineName(sorted.nombre_rutina);
+        setInlineRoutineName(sorted.nombre_rutina);
+        setEditFechaInicio(sorted.fecha_inicio);
+        setEditFechaCambio(sorted.fecha_cambio);
+        setEditNotasGenerales(sorted.notas_generales || '');
+
+        const savedBlock = savedActiveBlockId || localStorage.getItem(`fitpro_active_block_${alumno.id}`);
+        if (savedBlock && sorted.bloques.some((b) => b.id === savedBlock)) {
+          setActiveBlockId(savedBlock);
+        } else {
+          setActiveBlockId(sorted.bloques[0]?.id || '');
+        }
+      }
+    }
+  }, [alumno.id, rutinas]);
+
+  // Selección de día / bloque (NO sobreescribe ni resetea la rutina)
   const handleSelectBlock = (blockId: string) => {
     setActiveBlockId(blockId);
     try {
@@ -99,107 +149,50 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     }
   };
 
-  // Guardar y notificar cambio de rutina / fase
+  // Cambio de rutina / fase
   const handleSelectRoutine = (routineId: string) => {
     setActiveRoutineId(routineId);
     try {
       localStorage.setItem(`fitpro_active_routine_${alumno.id}`, routineId);
     } catch {}
+    const validRoutines = rutinas.filter((r) => String(r.alumno_id) === String(alumno.id));
+    const target = validRoutines.find((r) => r.id === routineId);
+    if (target) {
+      const sortedTarget = sortRoutineBloquesAndEjercicios(target);
+      setLocalRoutine(sortedTarget);
+      setEditRoutineName(sortedTarget.nombre_rutina);
+      setInlineRoutineName(sortedTarget.nombre_rutina);
+      setEditFechaInicio(sortedTarget.fecha_inicio);
+      setEditFechaCambio(sortedTarget.fecha_cambio);
+      setEditNotasGenerales(sortedTarget.notas_generales || '');
+      setActiveBlockId(sortedTarget.bloques[0]?.id || '');
+    }
     if (onActiveRoutineChange) {
       onActiveRoutineChange(routineId);
     }
   };
 
-  // View mode for desktop (cards vs table)
+  // Modo de vista en planilla (tabla) vs tarjetas
   const [viewMode, setViewMode] = useState<'cards' | 'table'>('table');
 
-  // Exercise Delete Confirmation Modal
+  // Modales
   const [exerciseToDelete, setExerciseToDelete] = useState<{ rowIdx: number; name: string } | null>(null);
-
-  // Routine Delete Confirmation Modal
   const [showDeleteRoutineModal, setShowDeleteRoutineModal] = useState(false);
-
-  // Biomechanical library picker
   const [showLibrary, setShowLibrary] = useState(false);
   const [libraryFilter, setLibraryFilter] = useState('');
   const [targetRowForLibrary, setTargetRowForLibrary] = useState<number | null>(null);
 
-  // Routine Meta Editor Modal
   const [showMetaModal, setShowMetaModal] = useState(false);
   const [editRoutineName, setEditRoutineName] = useState('');
   const [editFechaInicio, setEditFechaInicio] = useState('');
   const [editFechaCambio, setEditFechaCambio] = useState('');
   const [editNotasGenerales, setEditNotasGenerales] = useState('');
 
-  // Inline Routine Name Editor
   const [isEditingRoutineName, setIsEditingRoutineName] = useState(false);
   const [inlineRoutineName, setInlineRoutineName] = useState('');
 
-  // Day Rename state
   const [editingBlockId, setEditingBlockId] = useState<string | null>(null);
   const [blockNameInput, setBlockNameInput] = useState('');
-
-  // Local state
-  const [localRoutine, setLocalRoutine] = useState<Rutina | null>(currentRoutine || null);
-
-  // Sincronizar estado cuando cambie el alumno o las rutinas SIN resetear el día donde estaba el usuario
-  useEffect(() => {
-    const validRoutines = rutinas.filter((r) => r.alumno_id === alumno.id);
-    const target =
-      validRoutines.find((r) => r.id === activeRoutineId) ||
-      validRoutines.find((r) => r.activa) ||
-      validRoutines[0] ||
-      null;
-
-    if (target) {
-      setActiveRoutineId(target.id);
-      setLocalRoutine(target);
-      setEditRoutineName(target.nombre_rutina);
-      setInlineRoutineName(target.nombre_rutina);
-      setEditFechaInicio(target.fecha_inicio);
-      setEditFechaCambio(target.fecha_cambio);
-      setEditNotasGenerales(target.notas_generales || '');
-
-      // Preservar el bloque actual si aún existe, o restaurar el guardado previamente
-      const savedBlock = savedActiveBlockId || localStorage.getItem(`fitpro_active_block_${alumno.id}`);
-      if (activeBlockId && target.bloques.some((b) => b.id === activeBlockId)) {
-        // Mantener el bloque seleccionado
-      } else if (savedBlock && target.bloques.some((b) => b.id === savedBlock)) {
-        setActiveBlockId(savedBlock);
-      } else {
-        setActiveBlockId(target.bloques[0]?.id || '');
-      }
-    } else {
-      // No limpiar si ya tenemos una rutina cargada localmente (evita parpadeo durante actualización)
-      if (validRoutines.length === 0 && !localRoutine) {
-        setActiveRoutineId('');
-        setActiveBlockId('');
-        setLocalRoutine(null);
-      }
-    }
-  }, [alumno.id, rutinas, savedActiveBlockId]);
-
-  // Sincronizar cuando el usuario cambia de fase/rutina del mismo alumno
-  useEffect(() => {
-    const validRoutines = rutinas.filter((r) => r.alumno_id === alumno.id);
-    const target = validRoutines.find((r) => r.id === activeRoutineId);
-    if (target) {
-      setLocalRoutine(target);
-      setEditRoutineName(target.nombre_rutina);
-      setInlineRoutineName(target.nombre_rutina);
-      setEditFechaInicio(target.fecha_inicio);
-      setEditFechaCambio(target.fecha_cambio);
-      setEditNotasGenerales(target.notas_generales || '');
-      if (!target.bloques.some((b) => b.id === activeBlockId)) {
-        const savedBlock = savedActiveBlockId || localStorage.getItem(`fitpro_active_block_${alumno.id}`);
-        if (savedBlock && target.bloques.some((b) => b.id === savedBlock)) {
-          setActiveBlockId(savedBlock);
-        } else {
-          setActiveBlockId(target.bloques[0]?.id || '');
-        }
-      }
-    }
-  }, [activeRoutineId, savedActiveBlockId]);
 
   const activeBlock = localRoutine?.bloques.find((b) => b.id === activeBlockId) || localRoutine?.bloques[0];
   const activeBlockIndex = localRoutine?.bloques.findIndex((b) => b.id === activeBlock?.id) ?? 0;
@@ -228,13 +221,14 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     }
   };
 
-  const handleUpdateExercise = (rowIdx: number, field: keyof EjercicioRutina, value: string) => {
+  // Modificación de ejercicios (actualiza local y guarda de forma segura)
+  const handleUpdateExerciseFields = (rowIdx: number, fields: Partial<EjercicioRutina>) => {
     if (!localRoutine || !activeBlock) return;
 
     const updatedExercises = [...activeBlock.ejercicios];
     updatedExercises[rowIdx] = {
       ...updatedExercises[rowIdx],
-      [field]: value
+      ...fields
     };
 
     const updatedBlocks = localRoutine.bloques.map((b) =>
@@ -251,13 +245,17 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     onSaveRoutine(updatedRoutine);
   };
 
+  const handleUpdateExercise = (rowIdx: number, field: keyof EjercicioRutina, value: string) => {
+    handleUpdateExerciseFields(rowIdx, { [field]: value });
+  };
+
   const handleInsertRow = (atIndex: number) => {
     if (!localRoutine || !activeBlock) return;
     const newEx: EjercicioRutina = {
       id: 'ej-' + Date.now() + Math.random().toString(36).substr(2, 4),
       bloque_id: activeBlock.id,
       orden: atIndex + 1,
-      ejercicio: 'Nuevo Ejercicio',
+      ejercicio: '',
       series: '3',
       repeticiones: '10',
       carga: '',
@@ -279,6 +277,36 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     onSaveRoutine(updatedRoutine);
   };
 
+  const handleInsertSeparatorRow = (atIndex: number) => {
+    if (!localRoutine || !activeBlock) return;
+    const newSep: EjercicioRutina = {
+      id: 'sep-' + Date.now() + Math.random().toString(36).substr(2, 4),
+      bloque_id: activeBlock.id,
+      orden: atIndex + 1,
+      ejercicio: '— SEPARADOR —',
+      series: '',
+      repeticiones: '',
+      carga: '',
+      carga_p2: '',
+      pausa: '',
+      observaciones_dosificacion: '',
+      es_separador: true,
+      subtitulo_bloque: ''
+    };
+
+    const newExs = [...activeBlock.ejercicios];
+    newExs.splice(atIndex, 0, newSep);
+    newExs.forEach((e, idx) => (e.orden = idx + 1));
+
+    const updatedBlocks = localRoutine.bloques.map((b) =>
+      b.id === activeBlock.id ? { ...b, ejercicios: newExs } : b
+    );
+
+    const updatedRoutine = { ...localRoutine, bloques: updatedBlocks, updated_at: new Date().toISOString() };
+    setLocalRoutine(updatedRoutine);
+    onSaveRoutine(updatedRoutine);
+  };
+
   const handleDeleteRow = (rowIdx: number) => {
     if (!localRoutine || !activeBlock) return;
 
@@ -286,10 +314,10 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     if (activeBlock.ejercicios.length <= 1) {
       newExs = [
         {
-          id: 'ej-' + Date.now(),
+          id: 'ej-' + Date.now() + Math.random().toString(36).substr(2, 4),
           bloque_id: activeBlock.id,
           orden: 1,
-          ejercicio: 'Nuevo Ejercicio',
+          ejercicio: '',
           series: '3',
           repeticiones: '10',
           carga: '',
@@ -325,7 +353,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     const cloned: EjercicioRutina = {
       ...source,
       id: 'ej-' + Date.now() + Math.random().toString(36).substr(2, 4),
-      ejercicio: `${source.ejercicio} (Variante)`
+      ejercicio: source.ejercicio
     };
 
     const newExs = [...activeBlock.ejercicios];
@@ -364,28 +392,29 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
   const handleAddBlock = () => {
     if (!localRoutine) return;
     const blockNum = localRoutine.bloques.length + 1;
+    const newBlockId = 'blk-' + Date.now() + Math.random().toString(36).substr(2, 4);
     const newBlock: BloqueRutina = {
-      id: 'blk-' + Date.now(),
+      id: newBlockId,
       rutina_id: localRoutine.id,
       nombre_sub_pestana: `Día ${blockNum}: Bloque de Entrenamiento`,
       orden: blockNum,
       ejercicios: [
         {
-          id: 'ej-' + Date.now(),
-          bloque_id: 'blk-' + Date.now(),
+          id: 'ej-' + Date.now() + Math.random().toString(36).substr(2, 4),
+          bloque_id: newBlockId,
           orden: 1,
-          ejercicio: 'Sentadilla Goblet con Talones Elevados',
+          ejercicio: '',
           series: '3',
-          repeticiones: '10-12',
-          carga: '12 kg',
-          carga_p2: '14 kg',
-          pausa: '75s',
+          repeticiones: '10',
+          carga: '',
+          carga_p2: '',
+          pausa: '60s',
           observaciones_dosificacion: ''
         }
       ]
     };
 
-    const updatedRoutine = {
+    const updatedRoutine: Rutina = {
       ...localRoutine,
       bloques: [...localRoutine.bloques, newBlock],
       updated_at: new Date().toISOString()
@@ -400,7 +429,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     const updatedBlocks = localRoutine.bloques.filter((b) => b.id !== blockId);
     updatedBlocks.forEach((b, idx) => (b.orden = idx + 1));
     const nextActive = updatedBlocks[0]?.id || '';
-    const updatedRoutine = {
+    const updatedRoutine: Rutina = {
       ...localRoutine,
       bloques: updatedBlocks,
       updated_at: new Date().toISOString()
@@ -418,7 +447,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     const updatedBlocks = localRoutine.bloques.map((b) =>
       b.id === blockId ? { ...b, nombre_sub_pestana: blockNameInput.trim() } : b
     );
-    const updatedRoutine = {
+    const updatedRoutine: Rutina = {
       ...localRoutine,
       bloques: updatedBlocks,
       updated_at: new Date().toISOString()
@@ -458,7 +487,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
       b.id === activeBlock.id ? { ...b, ejercicios: updatedExercises } : b
     );
 
-    const updatedRoutine = { ...localRoutine, bloques: updatedBlocks, updated_at: new Date().toISOString() };
+    const updatedRoutine: Rutina = { ...localRoutine, bloques: updatedBlocks, updated_at: new Date().toISOString() };
     setLocalRoutine(updatedRoutine);
     onSaveRoutine(updatedRoutine);
     setShowLibrary(false);
@@ -495,34 +524,35 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
   );
 
   return (
-    <div className="w-full max-w-full space-y-4 pb-28 overflow-x-hidden">
-      {/* 0. TOP ACTION BAR WITH PROMINENT BACK BUTTON */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-slate-900/90 border border-slate-800 p-3 sm:p-4 rounded-2xl shadow-sm">
-        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+    <div className="w-full max-w-full space-y-2.5 sm:space-y-4 pb-28 overflow-x-hidden">
+      {/* 0. Barra superior con navegación */}
+      <div className="flex items-center justify-between gap-2 bg-slate-900/90 border border-slate-800 p-2 sm:p-3.5 rounded-xl sm:rounded-2xl shadow-sm">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
           <button
             onClick={onBackToAlumnos}
-            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 text-xs font-bold transition shrink-0 active:scale-95 group shadow-sm"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 text-xs font-bold transition shrink-0 active:scale-95 group shadow-sm"
             title="Volver a la lista principal de alumnos"
           >
-            <ArrowLeft className="w-4 h-4 text-emerald-400 group-hover:-translate-x-1 transition-transform" />
-            <span>Volver a Alumnos</span>
+            <ArrowLeft className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-400 group-hover:-translate-x-1 transition-transform" />
+            <span>Volver<span className="hidden sm:inline"> a Alumnos</span></span>
           </button>
 
           <div className="min-w-0 flex-1">
-            <h3 className="text-base font-bold text-white truncate">
+            <h3 className="text-xs sm:text-base font-bold text-white truncate leading-tight">
               {alumno.nombre} {alumno.apellido}
             </h3>
-            <p className="text-[11px] text-slate-400 font-mono truncate">
+            <p className="text-[10px] sm:text-[11px] text-slate-400 font-mono truncate leading-none mt-0.5">
               {alumno.telefono}
             </p>
           </div>
         </div>
 
-        {/* Export & Switcher Buttons */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Botones de Exportación & Switcher de Alumnos */}
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             onClick={() => exportRoutineToPDF(alumno, localRoutine, evaluacion)}
-            className="flex-1 sm:flex-initial px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition active:scale-95"
+            className="px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg sm:rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-[11px] sm:text-xs font-semibold flex items-center justify-center gap-1 sm:gap-1.5 transition active:scale-95"
+            title="Descargar PDF"
           >
             <FileDown className="w-3.5 h-3.5 text-emerald-400" />
             <span>PDF</span>
@@ -530,7 +560,8 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
 
           <button
             onClick={() => shareRoutineViaWhatsApp(alumno, localRoutine, evaluacion)}
-            className="flex-1 sm:flex-initial px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-95 shadow-sm"
+            className="px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg sm:rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] sm:text-xs font-bold flex items-center justify-center gap-1 sm:gap-1.5 transition active:scale-95 shadow-sm"
+            title="Compartir por WhatsApp"
           >
             <Share2 className="w-3.5 h-3.5" />
             <span>WhatsApp</span>
@@ -543,7 +574,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                 const target = allAlumnos.find((a) => a.id === e.target.value);
                 if (target && onSwitchStudent) onSwitchStudent(target);
               }}
-              className="hidden lg:block px-2.5 py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-slate-200 font-semibold focus:outline-none"
+              className="hidden lg:block px-2.5 py-1.5 sm:py-2 rounded-xl bg-slate-950 border border-slate-700 text-xs text-slate-200 font-semibold focus:outline-none"
             >
               {allAlumnos.map((a) => (
                 <option key={a.id} value={a.id}>
@@ -555,11 +586,9 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
         </div>
       </div>
 
-      {/* 1. SELECCIÓN DE RUTINA, NOMBRE EDITABLE EN LÍNEA & CONFIGURACIÓN */}
-      <div className="p-3 sm:p-4 rounded-2xl bg-[#0b101b] border border-slate-800 shadow-sm space-y-4">
-        {/* Fila superior: Título de Rutina + Fechas + Selector + Nueva Rutina */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          {/* Título de Rutina con punto verde y lápiz */}
+      {/* 1. Selección de Rutina & Pestañas de Días */}
+      <div className="p-2.5 sm:p-4 rounded-xl sm:rounded-2xl bg-[#0b101b] border border-slate-800 shadow-sm space-y-2.5 sm:space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
           <div className="flex items-center gap-2 min-w-0">
             {isEditingRoutineName ? (
               <div className="flex items-center gap-1.5 w-full max-w-md">
@@ -573,27 +602,27 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                   }}
                   autoFocus
                   placeholder="Nombre de la rutina..."
-                  className="w-full bg-slate-950 text-white font-bold text-sm px-2.5 py-1 rounded-xl border border-emerald-500 focus:outline-none"
+                  className="w-full bg-slate-950 text-white font-bold text-xs sm:text-sm px-2.5 py-1 rounded-xl border border-emerald-500 focus:outline-none"
                 />
                 <button
                   type="button"
                   onClick={handleSaveInlineRoutineName}
-                  className="p-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 shrink-0"
+                  className="p-1 sm:p-1.5 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 shrink-0"
                 >
                   <Check className="w-3.5 h-3.5" />
                 </button>
                 <button
                   type="button"
                   onClick={() => setIsEditingRoutineName(false)}
-                  className="p-1.5 bg-slate-800 text-slate-300 rounded-lg hover:text-white shrink-0"
+                  className="p-1 sm:p-1.5 bg-slate-800 text-slate-300 rounded-lg hover:text-white shrink-0"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
               </div>
             ) : (
-              <div className="flex items-center gap-2.5 min-w-0">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0 shadow-sm shadow-emerald-400/50" />
-                <h2 className="text-base sm:text-lg font-black text-white tracking-tight truncate">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-400 shrink-0 shadow-sm shadow-emerald-400/50" />
+                <h2 className="text-sm sm:text-lg font-bold sm:font-black text-white tracking-tight truncate">
                   {localRoutine.nombre_rutina}
                 </h2>
                 <button
@@ -611,26 +640,23 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
             )}
           </div>
 
-          {/* Botones y Selector de Rutina */}
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            {/* Fechas */}
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0">
             <button
               onClick={() => setShowMetaModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 font-mono hover:border-slate-700 transition"
+              className="flex items-center gap-1 px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl bg-slate-950 border border-slate-800 text-[11px] sm:text-xs text-slate-300 font-mono hover:border-slate-700 transition"
               title="Configurar ciclo de fechas"
             >
-              <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+              <Calendar className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400" />
               <span>{localRoutine.fecha_inicio} al {localRoutine.fecha_cambio}</span>
-              <Settings className="w-3 h-3 text-slate-400" />
+              <Settings className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-slate-400" />
             </button>
 
-            {/* Selector de Rutinas */}
             {rutinas.length > 1 && (
               <div className="flex items-center gap-1">
                 <select
                   value={activeRoutineId}
                   onChange={(e) => handleSelectRoutine(e.target.value)}
-                  className="px-3 py-1.5 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-200 font-semibold focus:outline-none focus:border-emerald-500"
+                  className="px-2.5 py-1 sm:px-3 sm:py-1.5 rounded-lg sm:rounded-xl bg-slate-950 border border-slate-800 text-[11px] sm:text-xs text-slate-200 font-semibold focus:outline-none focus:border-emerald-500"
                 >
                   {rutinas.map((r, i) => (
                     <option key={r.id} value={r.id}>
@@ -642,35 +668,34 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                   <button
                     type="button"
                     onClick={() => setShowDeleteRoutineModal(true)}
-                    className="p-1.5 rounded-xl bg-slate-950 hover:bg-rose-950/60 border border-slate-800 hover:border-rose-800 text-slate-400 hover:text-rose-400 transition"
+                    className="p-1 sm:p-1.5 rounded-lg sm:rounded-xl bg-slate-950 hover:bg-rose-950/60 border border-slate-800 hover:border-rose-800 text-slate-400 hover:text-rose-400 transition"
                     title="Eliminar esta fase de rutina"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                   </button>
                 )}
               </div>
             )}
 
-            {/* Botón + Nueva Rutina */}
             <button
               type="button"
               onClick={handleCreateNewRoutineInstant}
-              className="px-3.5 py-1.5 rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500 text-emerald-400 font-bold text-xs flex items-center gap-1.5 transition active:scale-95 shadow-sm"
+              className="px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-lg sm:rounded-xl bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500 text-emerald-400 font-bold text-[11px] sm:text-xs flex items-center gap-1 sm:gap-1.5 transition active:scale-95 shadow-sm"
               title="Crear nueva rutina para este alumno"
             >
-              <Plus className="w-3.5 h-3.5" />
+              <Plus className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
               <span>Nueva Rutina</span>
             </button>
           </div>
         </div>
 
         {/* Sección: DÍAS / BLOQUES DE ENTRENAMIENTO */}
-        <div className="space-y-2 pt-1">
-          <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">
+        <div className="space-y-1.5 sm:space-y-2 pt-0.5 sm:pt-1">
+          <label className="block text-[10px] sm:text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">
             DÍAS / BLOQUES DE ENTRENAMIENTO
           </label>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {localRoutine.bloques.map((b, idx) => {
               const isActive = b.id === activeBlockId;
               const count = b.ejercicios.length;
@@ -679,16 +704,16 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                 <button
                   key={b.id}
                   onClick={() => handleSelectBlock(b.id)}
-                  className={`px-4 py-2 rounded-xl text-left transition-all active:scale-95 border flex items-center gap-2 text-xs sm:text-sm ${
+                  className={`px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg sm:rounded-xl text-left transition-all active:scale-95 border flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm ${
                     isActive
                       ? 'bg-emerald-600 text-white border-emerald-400 font-bold shadow-md shadow-emerald-950/40'
                       : 'bg-slate-950 text-slate-300 border-slate-800 hover:border-slate-700 hover:bg-slate-900 font-semibold'
                   }`}
                 >
-                  <span className={`w-2 h-2 rounded-full ${isActive ? 'bg-white' : 'bg-emerald-500'}`} />
+                  <span className={`w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full ${isActive ? 'bg-white' : 'bg-emerald-500'}`} />
                   <span>Día {idx + 1}</span>
-                  <span className={`text-[11px] font-mono ${isActive ? 'text-emerald-100 font-normal' : 'text-slate-400'}`}>
-                    {count} {count === 1 ? 'ejer.' : 'ejer.'}
+                  <span className={`text-[10px] sm:text-[11px] font-mono ${isActive ? 'text-emerald-100 font-normal' : 'text-slate-400'}`}>
+                    {count} ejer.
                   </span>
                 </button>
               );
@@ -696,19 +721,18 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
 
             <button
               onClick={handleAddBlock}
-              className="px-3.5 py-2 rounded-xl border border-dashed border-slate-700 bg-slate-950/60 hover:bg-slate-900 hover:border-emerald-500 text-slate-300 hover:text-emerald-400 text-xs font-bold flex items-center gap-1.5 transition active:scale-95"
+              className="px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl border border-dashed border-slate-700 bg-slate-950/60 hover:bg-slate-900 hover:border-emerald-500 text-slate-300 hover:text-emerald-400 text-xs font-bold flex items-center gap-1 sm:gap-1.5 transition active:scale-95"
             >
-              <Plus className="w-3.5 h-3.5 text-emerald-400" />
+              <Plus className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400" />
               <span>Nuevo Día</span>
             </button>
           </div>
         </div>
 
-        {/* CONTENEDOR PRINCIPAL DEL DÍA ACTIVO CON LA PLANILLA */}
+        {/* CONTENEDOR PRINCIPAL DEL DÍA ACTIVO */}
         {activeBlock && (
-          <div className="rounded-2xl border border-slate-800 bg-[#070b14] overflow-hidden shadow-xl mt-3">
-            {/* Barra de cabecera del Día: "Día 1: Principal ✏️" + "Banco de Ejercicios" + "Planilla / Tarjetas" */}
-            <div className="p-3 sm:px-4 sm:py-3 border-b border-slate-800/80 bg-slate-950/90 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="rounded-xl sm:rounded-2xl border border-slate-800 bg-[#070b14] overflow-hidden shadow-xl mt-2 sm:mt-3">
+            <div className="p-2.5 sm:px-4 sm:py-3 border-b border-slate-800/80 bg-slate-950/90 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
               <div className="flex items-center gap-2 min-w-0">
                 {editingBlockId === activeBlock.id ? (
                   <div className="flex items-center gap-1.5 w-full max-w-sm">
@@ -768,342 +792,449 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               </div>
 
               {/* Lado derecho: Banco de Ejercicios + Switcher Planilla / Tarjetas */}
-              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+              <div className="flex items-center gap-1.5 sm:gap-2 self-start sm:self-auto shrink-0 flex-wrap">
                 <button
                   onClick={() => {
                     setTargetRowForLibrary(0);
                     setShowLibrary(true);
                   }}
-                  className="px-3.5 py-1.5 rounded-xl border border-emerald-500/40 bg-slate-900/90 hover:bg-slate-850 text-emerald-400 text-xs font-bold flex items-center gap-1.5 transition active:scale-95 shadow-sm"
+                  className="px-2.5 py-1 sm:px-3.5 sm:py-1.5 rounded-lg sm:rounded-xl border border-emerald-500/40 bg-slate-900/90 hover:bg-slate-850 text-emerald-400 text-[11px] sm:text-xs font-bold flex items-center gap-1 sm:gap-1.5 transition active:scale-95 shadow-sm"
                 >
-                  <BookOpen className="w-3.5 h-3.5 text-emerald-400" />
+                  <BookOpen className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-emerald-400" />
                   <span>Banco de Ejercicios</span>
                 </button>
 
-                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-0.5">
+                <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg sm:rounded-xl p-0.5">
                   <button
                     onClick={() => setViewMode('table')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                    className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg text-[11px] sm:text-xs font-bold flex items-center gap-1 sm:gap-1.5 transition ${
                       viewMode === 'table'
                         ? 'bg-slate-900 text-emerald-400 shadow-sm'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    <TableIcon className="w-3.5 h-3.5" />
+                    <TableIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     <span>Planilla</span>
                   </button>
                   <button
                     onClick={() => setViewMode('cards')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+                    className={`px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-md sm:rounded-lg text-[11px] sm:text-xs font-bold flex items-center gap-1 sm:gap-1.5 transition ${
                       viewMode === 'cards'
                         ? 'bg-slate-900 text-emerald-400 shadow-sm'
                         : 'text-slate-400 hover:text-slate-200'
                     }`}
                   >
-                    <LayoutGrid className="w-3.5 h-3.5" />
+                    <LayoutGrid className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
                     <span>Tarjetas</span>
                   </button>
                 </div>
               </div>
             </div>
 
-            {/* TABLA ESTILO PLANILLA CON SERIES Y REPETICIONES AMPLIAS Y OBSERVACIONES COMPACTAS */}
+            {/* TABLA ESTILO PLANILLA EXACTA */}
             {viewMode === 'table' ? (
               <div className="w-full overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-slate-950/80 text-slate-400 font-bold border-b border-slate-800/80 uppercase tracking-wider text-[11px] font-mono">
-                      <th className="py-3 px-2 w-9 text-center">#</th>
-                      <th className="py-3 px-3 min-w-[190px]">EJERCICIO</th>
-                      {/* SERIES AMPLIAS */}
-                      <th className="py-3 px-2 w-24 sm:w-28 min-w-[85px] text-center">SERIES</th>
-                      {/* REPS AMPLIAS */}
-                      <th className="py-3 px-2 w-28 sm:w-36 min-w-[105px] text-center">REPS</th>
-                      <th className="py-2.5 px-1 w-16 text-center text-emerald-400" title="Carga P1 (Semana 1-2 / Fase Inicial)">
+                      <th className="py-2 sm:py-3 px-2 w-9 text-center">#</th>
+                      <th className="py-2 sm:py-3 px-2.5 sm:px-3 min-w-[180px]">EJERCICIO</th>
+                      <th className="py-2 sm:py-3 px-2 w-24 sm:w-28 min-w-[85px] text-center">SERIES</th>
+                      <th className="py-2 sm:py-3 px-2 w-28 sm:w-36 min-w-[105px] text-center">REPS</th>
+                      <th className="py-1.5 sm:py-2.5 px-1 w-16 text-center text-emerald-400" title="Carga P1 (Semana 1-2 / Fase Inicial)">
                         <div className="flex flex-col items-center leading-none gap-0.5">
                           <span className="font-bold text-[11px] font-mono">P1</span>
                           <span className="text-[9px] text-slate-500 font-medium tracking-normal font-sans">CARGA</span>
                         </div>
                       </th>
-                      <th className="py-2.5 px-1 w-16 text-center text-emerald-400" title="Carga P2 (Semana 3-4 / Progresión)">
+                      <th className="py-1.5 sm:py-2.5 px-1 w-16 text-center text-emerald-400" title="Carga P2 (Semana 3-4 / Progresión)">
                         <div className="flex flex-col items-center leading-none gap-0.5">
                           <span className="font-bold text-[11px] font-mono">P2</span>
                           <span className="text-[9px] text-slate-500 font-medium tracking-normal font-sans">CARGA</span>
                         </div>
                       </th>
-                      <th className="py-3 px-1.5 w-14 text-center">PAUSA</th>
-                      {/* OBSERVACIONES ACHICADAS */}
-                      <th className="py-3 px-2 w-28 sm:w-36 max-w-[130px]" title="Observaciones">OBS.</th>
-                      <th className="py-3 px-2 w-24 text-center">ACCIONES</th>
+                      <th className="py-2 sm:py-3 px-1 w-16 text-center">PAUSA</th>
+                      <th className="py-2 sm:py-3 px-2 w-28 sm:w-36 max-w-[130px]" title="Observaciones de dosificación">OBS.</th>
+                      <th className="py-2 sm:py-3 px-1.5 sm:px-2 w-24 text-center">ACCIONES</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-800/60 font-mono">
-                    {activeBlock.ejercicios.map((ej, rowIdx) => (
-                      <tr key={ej.id} className="hover:bg-slate-900/60 transition group">
-                        {/* # */}
-                        <td className="py-3 px-2 text-center text-slate-400 font-bold text-xs">
-                          {ej.orden || rowIdx + 1}
-                        </td>
+                    {activeBlock.ejercicios.map((ej, rowIdx) => {
+                      if (ej.es_separador) {
+                        return (
+                          <tr
+                            key={ej.id}
+                            className="bg-slate-900/90 border-y-2 border-emerald-500/40 hover:bg-slate-850 transition group"
+                          >
+                            <td className="py-2 sm:py-2.5 px-2 text-center text-emerald-400 font-bold">
+                              <Minus className="w-4 h-4 mx-auto text-emerald-400" />
+                            </td>
+                            <td colSpan={7} className="py-1.5 sm:py-2 px-2.5 sm:px-3">
+                              <div className="flex items-center gap-2">
+                                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 font-sans">
+                                  Separador de Bloque
+                                </span>
+                                <input
+                                  type="text"
+                                  value={ej.subtitulo_bloque || (ej.ejercicio && !ej.ejercicio.includes('SEPARADOR') ? ej.ejercicio : '')}
+                                  onChange={(e) => {
+                                    const val = e.target.value;
+                                    handleUpdateExerciseFields(rowIdx, {
+                                      subtitulo_bloque: val,
+                                      ejercicio: val.trim() ? `— SEPARADOR: ${val.trim()} —` : '— SEPARADOR —'
+                                    });
+                                  }}
+                                  placeholder="Ej: BLOQUE 2: ZONA MEDIA / MIEMBRO INFERIOR..."
+                                  className="w-full bg-transparent font-sans font-extrabold text-white text-xs sm:text-sm uppercase tracking-wide focus:outline-none focus:bg-slate-950 px-2 py-1 rounded border border-transparent focus:border-emerald-500/50"
+                                />
+                              </div>
+                            </td>
+                            <td className="py-1.5 sm:py-2 px-1.5 text-center">
+                              <div className="flex items-center justify-center gap-1 sm:gap-1.5 text-slate-400">
+                                <button
+                                  type="button"
+                                  onClick={() => handleInsertRow(rowIdx + 1)}
+                                  className="p-1 rounded hover:text-emerald-400 transition"
+                                  title="Insertar ejercicio debajo"
+                                >
+                                  <Plus className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleInsertSeparatorRow(rowIdx + 1)}
+                                  className="p-1 rounded hover:text-emerald-400 transition"
+                                  title="Insertar otro separador debajo"
+                                >
+                                  <Minus className="w-3.5 h-3.5 text-emerald-400" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setExerciseToDelete({ rowIdx, name: ej.subtitulo_bloque || 'Separador de Bloque' })}
+                                  className="p-1 rounded hover:text-rose-400 transition"
+                                  title="Eliminar separador"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      }
 
-                        {/* EJERCICIO */}
-                        <td className="py-2.5 px-3">
-                          <div className="flex items-center justify-between gap-2">
-                            <textarea
-                              rows={ej.ejercicio.length > 25 ? 2 : 1}
-                              value={ej.ejercicio}
-                              onChange={(e) => handleUpdateExercise(rowIdx, 'ejercicio', e.target.value)}
-                              placeholder="Nombre del ejercicio..."
-                              className="w-full bg-transparent font-sans font-bold text-white text-xs sm:text-sm resize-none focus:outline-none focus:bg-slate-900/80 px-1 py-1 rounded leading-snug"
+                      return (
+                        <tr key={ej.id} className="hover:bg-slate-900/60 transition group">
+                          {/* # */}
+                          <td className="py-2 sm:py-3 px-2 text-center text-slate-400 font-bold text-xs">
+                            {ej.orden || rowIdx + 1}
+                          </td>
+
+                          {/* EJERCICIO */}
+                          <td className="py-1.5 sm:py-2.5 px-2.5 sm:px-3">
+                            <div className="flex items-center justify-between gap-1.5">
+                              <textarea
+                                rows={ej.ejercicio.length > 25 ? 2 : 1}
+                                value={ej.ejercicio}
+                                onChange={(e) => handleUpdateExercise(rowIdx, 'ejercicio', e.target.value)}
+                                placeholder="Nombre del ejercicio..."
+                                className="w-full bg-transparent font-sans font-bold text-white text-xs sm:text-sm resize-none focus:outline-none focus:bg-slate-900/80 px-1 py-0.5 rounded leading-snug"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTargetRowForLibrary(rowIdx);
+                                  setShowLibrary(true);
+                                }}
+                                className="p-1 rounded text-slate-500 hover:text-emerald-400 shrink-0 transition"
+                                title="Banco de ejercicios"
+                              >
+                                <Sparkles className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+
+                          {/* SERIES */}
+                          <td className="py-1.5 sm:py-2 px-1.5 sm:px-2 w-24 sm:w-28 text-center">
+                            <input
+                              type="text"
+                              value={ej.series}
+                              onChange={(e) => handleUpdateExercise(rowIdx, 'series', e.target.value)}
+                              className="w-full bg-transparent text-center font-bold text-white text-xs sm:text-base font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
                             />
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setTargetRowForLibrary(rowIdx);
-                                setShowLibrary(true);
-                              }}
-                              className="p-1 rounded text-slate-500 hover:text-emerald-400 shrink-0 transition"
-                              title="Banco de ejercicios"
-                            >
-                              <Sparkles className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
+                          </td>
 
-                        {/* SERIES (AMPLIO) */}
-                        <td className="py-2 px-1.5 sm:px-2 w-24 sm:w-28 text-center">
-                          <input
-                            type="text"
-                            value={ej.series}
-                            onChange={(e) => handleUpdateExercise(rowIdx, 'series', e.target.value)}
-                            className="w-full bg-transparent text-center font-bold text-white text-xs sm:text-base font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
-                          />
-                        </td>
+                          {/* REPETICIONES */}
+                          <td className="py-1.5 sm:py-2 px-1.5 sm:px-2 w-28 sm:w-36 text-center">
+                            <input
+                              type="text"
+                              value={ej.repeticiones}
+                              onChange={(e) => handleUpdateExercise(rowIdx, 'repeticiones', e.target.value)}
+                              className="w-full bg-transparent text-center font-bold text-white text-xs sm:text-base font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
+                            />
+                          </td>
 
-                        {/* REPS (AMPLIO) */}
-                        <td className="py-2 px-1.5 sm:px-2 w-28 sm:w-36 text-center">
-                          <input
-                            type="text"
-                            value={ej.repeticiones}
-                            onChange={(e) => handleUpdateExercise(rowIdx, 'repeticiones', e.target.value)}
-                            className="w-full bg-transparent text-center font-bold text-white text-xs sm:text-base font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
-                          />
-                        </td>
+                          {/* P1 (CARGA 1) */}
+                          <td className="py-1.5 sm:py-2 px-1 text-center">
+                            <input
+                              type="text"
+                              value={ej.carga || ''}
+                              placeholder="-"
+                              title="Carga P1"
+                              onChange={(e) => handleUpdateExercise(rowIdx, 'carga', e.target.value)}
+                              className="w-full bg-transparent text-center font-bold text-emerald-400 text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
+                            />
+                          </td>
 
-                        {/* P1 (CARGA 1) */}
-                        <td className="py-2.5 px-1 text-center">
-                          <input
-                            type="text"
-                            value={ej.carga || ''}
-                            placeholder="-"
-                            title="Carga P1"
-                            onChange={(e) => handleUpdateExercise(rowIdx, 'carga', e.target.value)}
-                            className="w-full bg-transparent text-center font-bold text-emerald-400 text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
-                          />
-                        </td>
+                          {/* P2 (CARGA 2 / PROGRESIÓN) */}
+                          <td className="py-1.5 sm:py-2 px-1 text-center">
+                            <input
+                              type="text"
+                              value={ej.carga_p2 || ''}
+                              placeholder="-"
+                              title="Carga P2 (Progresión)"
+                              onChange={(e) => handleUpdateExercise(rowIdx, 'carga_p2', e.target.value)}
+                              className="w-full bg-transparent text-center font-bold text-emerald-400 text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
+                            />
+                          </td>
 
-                        {/* P2 (CARGA 2 / PROGRESIÓN) */}
-                        <td className="py-2.5 px-1 text-center">
-                          <input
-                            type="text"
-                            value={ej.carga_p2 || ''}
-                            placeholder="-"
-                            title="Carga P2 (Progresión)"
-                            onChange={(e) => handleUpdateExercise(rowIdx, 'carga_p2', e.target.value)}
-                            className="w-full bg-transparent text-center font-bold text-emerald-400 text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
-                          />
-                        </td>
+                          {/* PAUSA */}
+                          <td className="py-1.5 sm:py-2 px-1 text-center">
+                            <input
+                              type="text"
+                              value={ej.pausa}
+                              onChange={(e) => handleUpdateExercise(rowIdx, 'pausa', e.target.value)}
+                              className="w-full bg-transparent text-center font-bold text-slate-200 text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
+                            />
+                          </td>
 
-                        {/* PAUSA */}
-                        <td className="py-2.5 px-1.5 text-center">
-                          <input
-                            type="text"
-                            value={ej.pausa}
-                            onChange={(e) => handleUpdateExercise(rowIdx, 'pausa', e.target.value)}
-                            className="w-full bg-transparent text-center font-bold text-slate-200 text-xs sm:text-sm font-mono focus:outline-none focus:bg-slate-900/80 py-1 rounded"
-                          />
-                        </td>
+                          {/* OBSERVACIONES */}
+                          <td className="py-1.5 sm:py-2 px-1.5 sm:px-2 w-28 sm:w-36 max-w-[130px]">
+                            <input
+                              type="text"
+                              value={ej.observaciones_dosificacion || ''}
+                              onChange={(e) => handleUpdateExercise(rowIdx, 'observaciones_dosificacion', e.target.value)}
+                              placeholder="Notas..."
+                              title={ej.observaciones_dosificacion || 'Sin observaciones'}
+                              className="w-full bg-transparent text-slate-400 text-xs font-sans focus:outline-none focus:bg-slate-900/80 px-1 py-0.5 rounded truncate focus:truncate-none"
+                            />
+                          </td>
 
-                        {/* OBSERVACIONES (ACHICADO Y SIN TEXTO RELLENO) */}
-                        <td className="py-2 px-1.5 sm:px-2 w-28 sm:w-36 max-w-[130px]">
-                          <input
-                            type="text"
-                            value={ej.observaciones_dosificacion || ''}
-                            onChange={(e) => handleUpdateExercise(rowIdx, 'observaciones_dosificacion', e.target.value)}
-                            placeholder="Notas..."
-                            title={ej.observaciones_dosificacion || 'Sin observaciones'}
-                            className="w-full bg-transparent text-slate-400 text-xs font-sans focus:outline-none focus:bg-slate-900/80 px-1 py-0.5 rounded truncate focus:truncate-none"
-                          />
-                        </td>
-
-                        {/* ACCIONES */}
-                        <td className="py-2.5 px-2 text-center">
-                          <div className="flex items-center justify-center gap-1.5 text-slate-400">
-                            <button
-                              type="button"
-                              onClick={() => handleInsertRow(rowIdx + 1)}
-                              className="p-1 rounded hover:text-emerald-400 transition"
-                              title="Insertar debajo"
-                            >
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDuplicateRow(rowIdx)}
-                              className="p-1 rounded hover:text-white transition"
-                              title="Duplicar"
-                            >
-                              <Copy className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleMoveRow(rowIdx, 'up')}
-                              disabled={rowIdx === 0}
-                              className="p-1 rounded hover:text-white transition disabled:opacity-30 disabled:hover:text-slate-400"
-                              title="Subir orden"
-                            >
-                              <ArrowUp className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleMoveRow(rowIdx, 'down')}
-                              disabled={rowIdx === activeBlock.ejercicios.length - 1}
-                              className="p-1 rounded hover:text-white transition disabled:opacity-30 disabled:hover:text-slate-400"
-                              title="Bajar orden"
-                            >
-                              <ArrowDown className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio || `Ejercicio #${rowIdx + 1}` })}
-                              className="p-1 rounded hover:text-rose-400 transition"
-                              title="Eliminar"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                          {/* ACCIONES */}
+                          <td className="py-1.5 sm:py-2.5 px-1.5 text-center">
+                            <div className="flex items-center justify-center gap-0.5 sm:gap-1 text-slate-400">
+                              <button
+                                type="button"
+                                onClick={() => handleMoveRow(rowIdx, 'up')}
+                                disabled={rowIdx === 0}
+                                className="p-1 rounded hover:text-emerald-400 disabled:opacity-20 transition"
+                                title="Subir ejercicio"
+                              >
+                                <ArrowUp className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleMoveRow(rowIdx, 'down')}
+                                disabled={rowIdx === activeBlock.ejercicios.length - 1}
+                                className="p-1 rounded hover:text-emerald-400 disabled:opacity-20 transition"
+                                title="Bajar ejercicio"
+                              >
+                                <ArrowDown className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDuplicateRow(rowIdx)}
+                                className="p-1 rounded hover:text-emerald-400 transition"
+                                title="Duplicar fila"
+                              >
+                                <Copy className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleInsertSeparatorRow(rowIdx + 1)}
+                                className="p-1 rounded hover:text-emerald-400 transition"
+                                title="Insertar separador debajo"
+                              >
+                                <Minus className="w-3.5 h-3.5 text-emerald-400" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio || 'Ejercicio' })}
+                                className="p-1 rounded hover:text-rose-400 transition"
+                                title="Eliminar fila"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             ) : (
-              /* VISTA TARJETAS */
-              <div className="p-3 grid grid-cols-1 md:grid-cols-2 gap-3">
-                {activeBlock.ejercicios.map((ej, rowIdx) => (
-                  <div
-                    key={ej.id}
-                    className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 space-y-2.5"
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2 flex-1 min-w-0">
-                        <span className="w-6 h-6 rounded-lg bg-emerald-500/20 text-emerald-400 font-bold font-mono text-xs flex items-center justify-center shrink-0">
-                          {rowIdx + 1}
-                        </span>
-                        <input
-                          type="text"
-                          value={ej.ejercicio}
-                          onChange={(e) => handleUpdateExercise(rowIdx, 'ejercicio', e.target.value)}
-                          placeholder="Nombre del ejercicio..."
-                          className="w-full bg-transparent font-bold text-white text-xs sm:text-sm focus:outline-none"
-                        />
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
+              /* VISTA EN TARJETAS */
+              <div className="p-2 sm:p-4 space-y-2.5 sm:space-y-3">
+                {activeBlock.ejercicios.map((ej, rowIdx) => {
+                  if (ej.es_separador) {
+                    return (
+                      <div
+                        key={ej.id}
+                        className="p-2.5 sm:p-3 rounded-xl bg-slate-900/90 border border-emerald-500/40 flex items-center justify-between gap-2"
+                      >
+                        <div className="flex items-center gap-2 flex-1">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300">
+                            Separador
+                          </span>
+                          <input
+                            type="text"
+                            value={ej.subtitulo_bloque || (ej.ejercicio && !ej.ejercicio.includes('SEPARADOR') ? ej.ejercicio : '')}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              handleUpdateExerciseFields(rowIdx, {
+                                subtitulo_bloque: val,
+                                ejercicio: val.trim() ? `— SEPARADOR: ${val.trim()} —` : '— SEPARADOR —'
+                              });
+                            }}
+                            placeholder="Ej: BLOQUE 2: ZONA MEDIA..."
+                            className="w-full bg-transparent font-bold text-white text-xs sm:text-sm focus:outline-none"
+                          />
+                        </div>
                         <button
-                          onClick={() => {
-                            setTargetRowForLibrary(rowIdx);
-                            setShowLibrary(true);
-                          }}
-                          className="p-1 text-slate-400 hover:text-emerald-400"
-                        >
-                          <Sparkles className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDuplicateRow(rowIdx)}
-                          className="p-1 text-slate-400 hover:text-white"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio })}
+                          onClick={() => setExerciseToDelete({ rowIdx, name: ej.subtitulo_bloque || 'Separador' })}
                           className="p-1 text-slate-400 hover:text-rose-400"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </div>
-                    </div>
+                    );
+                  }
 
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center text-xs">
-                      <div className=" rounded-lg bg-slate-900 border border-slate-800">
-                        <span className="block text-[10px] text-slate-400 uppercase font-mono">Series</span>
-                        <input
-                          type="text"
-                          value={ej.series}
-                          onChange={(e) => handleUpdateExercise(rowIdx, 'series', e.target.value)}
-                          className="w-full text-center bg-transparent font-bold text-white focus:outline-none text-xs sm:text-sm font-mono"
-                        />
+                  return (
+                    <div
+                      key={ej.id}
+                      className="p-2.5 sm:p-3.5 rounded-xl sm:rounded-2xl bg-slate-950 border border-slate-800 space-y-2 sm:space-y-2.5 hover:border-slate-700 transition"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <span className="w-5 h-5 rounded bg-slate-900 border border-slate-800 text-[10px] font-mono font-bold text-slate-400 flex items-center justify-center shrink-0">
+                            {ej.orden || rowIdx + 1}
+                          </span>
+                          <input
+                            type="text"
+                            value={ej.ejercicio}
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'ejercicio', e.target.value)}
+                            placeholder="Nombre del ejercicio..."
+                            className="w-full bg-transparent font-bold text-white text-xs sm:text-sm focus:outline-none"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => {
+                              setTargetRowForLibrary(rowIdx);
+                              setShowLibrary(true);
+                            }}
+                            className="p-1 text-slate-400 hover:text-emerald-400"
+                            title="Banco de ejercicios"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDuplicateRow(rowIdx)}
+                            className="p-1 text-slate-400 hover:text-emerald-400"
+                            title="Duplicar"
+                          >
+                            <Copy className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setExerciseToDelete({ rowIdx, name: ej.ejercicio || 'Ejercicio' })}
+                            className="p-1 text-slate-400 hover:text-rose-400"
+                            title="Eliminar"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
-                      <div className=" rounded-lg bg-slate-900 border border-slate-800">
-                        <span className="block text-[10px] text-slate-400 uppercase font-mono">Reps</span>
-                        <input
-                          type="text"
-                          value={ej.repeticiones}
-                          onChange={(e) => handleUpdateExercise(rowIdx, 'repeticiones', e.target.value)}
-                          className="w-full text-center bg-transparent font-bold text-white focus:outline-none text-xs sm:text-sm font-mono"
-                        />
-                      </div>
-                      <div className=" rounded-lg bg-slate-900 border border-slate-800">
-                        <span className="block text-[10px] text-emerald-400 uppercase font-mono">P1 (Carga)</span>
-                        <input
-                          type="text"
-                          value={ej.carga || ''}
-                          placeholder="-"
-                          onChange={(e) => handleUpdateExercise(rowIdx, 'carga', e.target.value)}
-                          className="w-full text-center bg-transparent font-bold text-emerald-400 focus:outline-none text-xs sm:text-sm font-mono"
-                        />
-                      </div>
-                      <div className=" rounded-lg bg-slate-900 border border-slate-800">
-                        <span className="block text-[10px] text-emerald-400 uppercase font-mono">P2 (Carga)</span>
-                        <input
-                          type="text"
-                          value={ej.carga_p2 || ''}
-                          placeholder="-"
-                          onChange={(e) => handleUpdateExercise(rowIdx, 'carga_p2', e.target.value)}
-                          className="w-full text-center bg-transparent font-bold text-emerald-400 focus:outline-none text-xs sm:text-sm font-mono"
-                        />
-                      </div>
-                      <div className=" rounded-lg bg-slate-900 border border-slate-800 col-span-2 sm:col-span-1">
-                        <span className="block text-[10px] text-slate-400 uppercase font-mono">Pausa</span>
-                        <input
-                          type="text"
-                          value={ej.pausa}
-                          onChange={(e) => handleUpdateExercise(rowIdx, 'pausa', e.target.value)}
-                          className="w-full text-center bg-transparent font-bold text-slate-200 focus:outline-none text-xs sm:text-sm font-mono"
-                        />
-                      </div>
-                    </div>
 
-                    <input
-                      type="text"
-                      value={ej.observaciones_dosificacion || ''}
-                      onChange={(e) => handleUpdateExercise(rowIdx, 'observaciones_dosificacion', e.target.value)}
-                      placeholder="Observaciones de dosificación..."
-                      className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-2.5 py-1 text-xs text-slate-300 focus:outline-none"
-                    />
-                  </div>
-                ))}
+                      <div className="grid grid-cols-5 gap-1 sm:gap-2 text-center text-xs">
+                        <div className="py-0.5 px-0.5 sm:py-1.5 sm:px-1 rounded-md sm:rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="block text-[8px] sm:text-[10px] text-slate-400 uppercase font-mono leading-none mb-0.5">Series</span>
+                          <input
+                            type="text"
+                            value={ej.series}
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'series', e.target.value)}
+                            className="w-full text-center bg-transparent font-bold text-white focus:outline-none text-[11px] sm:text-sm font-mono py-0 leading-tight"
+                          />
+                        </div>
+                        <div className="py-0.5 px-0.5 sm:py-1.5 sm:px-1 rounded-md sm:rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="block text-[8px] sm:text-[10px] text-slate-400 uppercase font-mono leading-none mb-0.5">Reps</span>
+                          <input
+                            type="text"
+                            value={ej.repeticiones}
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'repeticiones', e.target.value)}
+                            className="w-full text-center bg-transparent font-bold text-white focus:outline-none text-[11px] sm:text-sm font-mono py-0 leading-tight"
+                          />
+                        </div>
+                        <div className="py-0.5 px-0.5 sm:py-1.5 sm:px-1 rounded-md sm:rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="block text-[8px] sm:text-[10px] text-emerald-400 uppercase font-mono leading-none mb-0.5">P1</span>
+                          <input
+                            type="text"
+                            value={ej.carga || ''}
+                            placeholder="-"
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'carga', e.target.value)}
+                            className="w-full text-center bg-transparent font-bold text-emerald-400 focus:outline-none text-[11px] sm:text-sm font-mono py-0 leading-tight"
+                          />
+                        </div>
+                        <div className="py-0.5 px-0.5 sm:py-1.5 sm:px-1 rounded-md sm:rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="block text-[8px] sm:text-[10px] text-emerald-400 uppercase font-mono leading-none mb-0.5">P2</span>
+                          <input
+                            type="text"
+                            value={ej.carga_p2 || ''}
+                            placeholder="-"
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'carga_p2', e.target.value)}
+                            className="w-full text-center bg-transparent font-bold text-emerald-400 focus:outline-none text-[11px] sm:text-sm font-mono py-0 leading-tight"
+                          />
+                        </div>
+                        <div className="py-0.5 px-0.5 sm:py-1.5 sm:px-1 rounded-md sm:rounded-lg bg-slate-900 border border-slate-800">
+                          <span className="block text-[8px] sm:text-[10px] text-slate-400 uppercase font-mono leading-none mb-0.5">Pausa</span>
+                          <input
+                            type="text"
+                            value={ej.pausa}
+                            onChange={(e) => handleUpdateExercise(rowIdx, 'pausa', e.target.value)}
+                            className="w-full text-center bg-transparent font-bold text-slate-200 focus:outline-none text-[11px] sm:text-sm font-mono py-0 leading-tight"
+                          />
+                        </div>
+                      </div>
+
+                      <input
+                        type="text"
+                        value={ej.observaciones_dosificacion || ''}
+                        onChange={(e) => handleUpdateExercise(rowIdx, 'observaciones_dosificacion', e.target.value)}
+                        placeholder="Observaciones de dosificación (opcional)..."
+                        className="w-full bg-slate-900/80 border border-slate-800 rounded-lg px-2 py-0.5 sm:py-1 text-[11px] sm:text-xs text-slate-300 focus:outline-none"
+                      />
+                    </div>
+                  );
+                })}
               </div>
             )}
 
-            {/* BOTÓN ANCHO: + Agregar Ejercicio al Día */}
-            <div className="p-3 border-t border-slate-800/80 bg-slate-950/40">
+            {/* BOTONES INFERIORES: Agregar Ejercicio & Separador de Bloque */}
+            <div className="p-2.5 sm:p-3 border-t border-slate-800/80 bg-slate-950/40 flex flex-col sm:flex-row items-center gap-2">
               <button
                 type="button"
                 onClick={() => handleInsertRow(activeBlock.ejercicios.length)}
-                className="w-full py-2.5 px-4 rounded-xl border border-slate-800 hover:border-emerald-500/60 bg-slate-950 hover:bg-slate-900 text-slate-200 hover:text-emerald-400 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition active:scale-98 shadow-sm"
+                className="w-full sm:flex-1 py-2 sm:py-2.5 px-4 rounded-xl border border-slate-800 hover:border-emerald-500/60 bg-slate-950 hover:bg-slate-900 text-slate-200 hover:text-emerald-400 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition active:scale-98 shadow-sm"
               >
                 <Plus className="w-4 h-4 text-emerald-400" />
                 <span>Agregar Ejercicio al Día {activeBlockIndex + 1}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleInsertSeparatorRow(activeBlock.ejercicios.length)}
+                className="w-full sm:w-auto py-2 sm:py-2.5 px-4 rounded-xl border border-emerald-500/30 hover:border-emerald-500 bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-300 text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition active:scale-98 shadow-sm shrink-0"
+                title="Inserta una fila vacía / separador para dividir bloques (ej: Zona Media vs Miembro Inferior)"
+              >
+                <span>+ Separador de Bloque</span>
               </button>
             </div>
           </div>
@@ -1198,7 +1329,6 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
       {showLibrary && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3 sm:p-5 overflow-y-auto">
           <div className="w-full max-w-2xl rounded-2xl bg-slate-900 border border-slate-700 shadow-2xl text-slate-100 max-h-[90vh] flex flex-col overflow-hidden">
-            {/* Header */}
             <div className="flex items-center justify-between p-4 sm:p-5 border-b border-slate-800 bg-slate-950/80 shrink-0">
               <div className="flex items-center gap-2.5">
                 <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
@@ -1221,20 +1351,16 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               </button>
             </div>
 
-            {/* Filter Search Input */}
             <div className="p-4 border-b border-slate-800 bg-slate-950/60 shrink-0">
-              <div className="relative">
-                <input
-                  type="text"
-                  value={libraryFilter}
-                  onChange={(e) => setLibraryFilter(e.target.value)}
-                  placeholder="Filtrar por nombre, patrón (sentadilla, empuje) o músculo..."
-                  className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
+              <input
+                type="text"
+                value={libraryFilter}
+                onChange={(e) => setLibraryFilter(e.target.value)}
+                placeholder="Filtrar por nombre, patrón (sentadilla, empuje) o músculo..."
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+              />
             </div>
 
-            {/* Exercises List */}
             <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
               {filteredLibrary.map((libEx, idx) => (
                 <div

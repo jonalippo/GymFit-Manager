@@ -135,7 +135,7 @@ export interface Alumno {
   fecha_pago_cuota?: string; // Fecha en que abonó YYYY-MM-DD
   fecha_vencimiento_cuota?: string; // Fecha de vencimiento a mes completo YYYY-MM-DD
   cuota_al_dia?: boolean; // Estado de la cuota: true (activo/al día), false (debe)
-  ultimo_monto_pago?: number;
+  ultimo_monto_pago?: number; // Monto abonado en la última cuota
 
   // Estado Biomecánico & Dolor
   alerta_lesion_activa?: string;
@@ -154,19 +154,21 @@ export interface EjercicioRutina {
   ejercicio: string;
   series: string;
   repeticiones: string;
-  carga?: string; 
-  carga_p2?: string; 
+  carga?: string; // Carga / Peso P1 (Semana 1-2 / Fase Inicial)
+  carga_p2?: string; // Carga / Peso P2 (Semana 3-4 / Progresión)
   pausa: string;
   rpe_objetivo?: string;
   tipo_cadena?: TipoCadena;
   observaciones_dosificacion: string;
   video_url?: string;
+  es_separador?: boolean; // Fila vacía / separador visual entre bloques de ejercicios
+  subtitulo_bloque?: string; // Título opcional del separador (ej: "Bloque 2: Zona Media", "Miembro Inferior")
 }
 
 export interface BloqueRutina {
   id: string;
   rutina_id: string;
-  nombre_sub_pestana: string; 
+  nombre_sub_pestana: string; // ej: "Día 1: Metabólico + Empuje"
   orden: number;
   ejercicios: EjercicioRutina[];
 }
@@ -174,9 +176,9 @@ export interface BloqueRutina {
 export interface Rutina {
   id: string;
   alumno_id: string;
-  nombre_rutina: string; 
+  nombre_rutina: string; // ej: "Rutina 1: Fase Adaptación Anatómica"
   fecha_inicio: string;
-  fecha_cambio: string; 
+  fecha_cambio: string; // vencimiento previsto
   activa: boolean;
   orden: number;
   notas_generales?: string;
@@ -189,8 +191,8 @@ export interface SeguimientoDiario {
   id: string;
   alumno_id: string;
   fecha: string;
-  rpe_fatiga: number; 
-  nivel_dolor: number; 
+  rpe_fatiga: number; // 1-10 (Borg CR-10)
+  nivel_dolor: number; // 0-10 EVA
   tolerancia_carga: 'muy_buena' | 'adecuada' | 'fatiga_excesiva' | 'sintomas_aumentados';
   notas: string;
   created_at: string;
@@ -221,10 +223,10 @@ export interface PagoCuota {
   grupo_id?: string;
   grupo_nombre?: string;
   monto: number;
-  fecha_pago: string;
-  fecha_vencimiento: string;
-  mes_correspondiente: string; 
-  metodo_pago?: string; 
+  fecha_pago: string; // YYYY-MM-DD
+  fecha_vencimiento: string; // YYYY-MM-DD
+  mes_correspondiente: string; // YYYY-MM
+  metodo_pago?: string; // 'efectivo' | 'transferencia' | 'tarjeta' | 'otro'
   notas?: string;
   created_at: string;
 }

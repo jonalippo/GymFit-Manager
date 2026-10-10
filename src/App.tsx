@@ -1,6 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Alumno, Grupo, Rutina, EvaluacionClinica, RolProfesor } from './types';
-import { DashboardHome } from './components/DashboardHome';
 import {
   openDB,
   seedInitialDataIfEmpty,
@@ -29,6 +28,7 @@ import { DailyTrackingModal } from './components/DailyTrackingModal';
 import { AuthScreen } from './components/AuthScreen';
 import { SupabaseSqlModal } from './components/SupabaseSqlModal';
 import { PaymentsManager } from './components/PaymentsManager';
+import { DashboardHome } from './components/DashboardHome';
 import {
   isSupabaseConfigured,
   fetchStudentsFromSupabase,
@@ -54,7 +54,6 @@ import {
   Brain,
   Layers,
   DollarSign,
-  LogOut,
   X
 } from 'lucide-react';
 
@@ -82,7 +81,7 @@ interface AuthUser {
 export default function App() {
   const [loading, setLoading] = useState(true);
 
-  // Authentication State: Inicia siempre desde Login al recargar la app
+  // Authentication State
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
     try {
       const saved = localStorage.getItem('fitpro_auth_user');
@@ -94,8 +93,8 @@ export default function App() {
 
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
   const [grupos, setGrupos] = useState<Grupo[]>([]);
-  
-  // Pagos en memoria y persistencia local sin requerir cambios en indexedDb
+
+  // Pagos en memoria y persistencia local
   const [pagos, setPagos] = useState<PagoCuota[]>(() => {
     try {
       const saved = localStorage.getItem('fitpro_local_pagos');
@@ -105,30 +104,35 @@ export default function App() {
     }
   });
 
-  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem('fitpro_selected_student_id') || null;
+    } catch {
+      return null;
+    }
+  });
 
-  // Modo Sala: Atletas fijados en el dock inferior (hasta 8)
+  // Modo Sala: Atletas fijados en el dock inferior
   const [activeDockStudents, setActiveDockStudents] = useState<Alumno[]>([]);
+  const isInitialLoadedRef = useRef(false);
 
-  // Navigation View (Alumnos, Grupos, Pagos, Rutina, Evaluacion)
-  const [activeView, setActiveView] = useState<'home' |'alumnos' | 'grupos' | 'pagos' | 'rutina' | 'evaluacion'>(() => {
+  // Navigation View: Recuerda la pantalla donde te encontrabas al recargar
+  const [activeView, setActiveView] = useState<'home' | 'alumnos' | 'grupos' | 'pagos' | 'rutina' | 'evaluacion'>(() => {
     try {
       const saved = localStorage.getItem('fitpro_active_view');
-      if (saved && ['alumnos', 'alumnos', 'grupos', 'pagos', 'rutina', 'evaluacion'].includes(saved)) {
+      if (saved && ['home', 'alumnos', 'grupos', 'pagos', 'rutina', 'evaluacion'].includes(saved)) {
         return saved as any;
       }
     } catch {}
     return 'home';
   });
 
-  // Guarda automáticamente la pantalla actual al navegar
   useEffect(() => {
     try {
       localStorage.setItem('fitpro_active_view', activeView);
     } catch {}
   }, [activeView]);
 
-  // Recuerda el alumno seleccionado al recargar
   useEffect(() => {
     try {
       if (selectedStudentId) {
@@ -137,25 +141,35 @@ export default function App() {
     } catch {}
   }, [selectedStudentId]);
 
+  // Persistir los alumnos en la sala activa durante la sesión (para que no se pierdan al actualizar/F5)
+  useEffect(() => {
+    if (!isInitialLoadedRef.current) return;
+    try {
+      if (currentUser) {
+        const ids = activeDockStudents.map((a) => a.id);
+        localStorage.setItem('fitpro_dock_student_ids', JSON.stringify(ids));
+      }
+    } catch {}
+  }, [activeDockStudents, currentUser]);
+
   // Selected Student Routines & Evaluation
   const [currentRutinas, setCurrentRutinas] = useState<Rutina[]>([]);
   const [currentEvaluacion, setCurrentEvaluacion] = useState<EvaluacionClinica | null>(null);
 
-  // Caché de rutinas por alumno para cambio instantáneo de pestañas sin recargar pantalla
+  // Caché de rutinas por alumno
   const [routinesByStudent, setRoutinesByStudent] = useState<Record<string, Rutina[]>>({});
-  // Memoria del Día/Bloque (Día 1, Día 2, etc.) y rutina activa para cada alumno
   const [studentActiveDays, setStudentActiveDays] = useState<Record<string, string>>({});
   const [studentActiveRoutines, setStudentActiveRoutines] = useState<Record<string, string>>({});
-  const isSavingRef = React.useRef(false);
+  const isSavingRef = useRef(false);
 
   // Modals
   const [isDailyLogOpen, setIsDailyLogOpen] = useState(false);
   const [isEvalModalOpen, setIsEvalModalOpen] = useState(false);
   const [isSupabaseModalOpen, setIsSupabaseModalOpen] = useState(false);
   const [dailyLogStudent, setDailyLogStudent] = useState<Alumno | null>(null);
-  const initialCloudSyncDone = React.useRef(false);
+  const initialCloudSyncDone = useRef(false);
 
-  // Cloud connection status & real-time toast feedback
+  // Feedback Toast
   const [isCloudConnected, setIsCloudConnected] = useState(() => isSupabaseConfigured());
   const [toastMessage, setToastMessage] = useState<{
     type: 'success' | 'error' | 'warning' | 'info';
@@ -169,29 +183,63 @@ export default function App() {
     }, 4500);
   }, []);
 
-  // Initialize DB and load data
+  // Carga de datos local e inicialización
   const loadData = useCallback(async () => {
     try {
       await seedInitialDataIfEmpty();
-      const allAlumnos = await getAlumnos();
-      const allGrupos = await getGrupos();
+      let allAlumnos = await getAlumnos();
+      let allGrupos = await getGrupos();
 
-      setAlumnos(allAlumnos);
-      setGrupos(allGrupos);
-
-      // Cloud sync con Supabase ÚNICAMENTE en el arranque inicial para no resucitar alumnos borrados
+      // Sincronización inteligente bidireccional con Supabase si está configurado en el primer inicio
       if (isSupabaseConfigured() && !initialCloudSyncDone.current) {
         initialCloudSyncDone.current = true;
         try {
           const cloudAlumnos = await fetchStudentsFromSupabase();
           if (cloudAlumnos && cloudAlumnos.length > 0) {
-            setAlumnos(cloudAlumnos);
-            for (const a of cloudAlumnos) {
+            // Unir alumnos para nunca perder alumnos locales creados previamente
+            const mergedAlumnosMap = new Map<string, Alumno>();
+            allAlumnos.forEach((a) => mergedAlumnosMap.set(a.id, a));
+            cloudAlumnos.forEach((a) => mergedAlumnosMap.set(a.id, a));
+            allAlumnos = Array.from(mergedAlumnosMap.values());
+
+            for (const a of allAlumnos) {
               await saveAlumno(a);
               const cloudRuts = await fetchRoutinesFromSupabase(a.id);
+              const localRuts = await getRutinasByAlumno(a.id);
+
               if (cloudRuts && cloudRuts.length > 0) {
-                for (const r of cloudRuts) {
-                  await saveRutina(r);
+                for (const cr of cloudRuts) {
+                  const lr = localRuts.find((r) => r.id === cr.id);
+                  const localEjsCount = lr?.bloques?.reduce((acc, b) => acc + (b.ejercicios?.length || 0), 0) || 0;
+                  const cloudEjsCount = cr.bloques?.reduce((acc, b) => acc + (b.ejercicios?.length || 0), 0) || 0;
+
+                  if (!lr) {
+                    await saveRutina(cr);
+                  } else if (localEjsCount > 0 && cloudEjsCount === 0) {
+                    // Proteger local: la nube está vacía pero localmente hay rutina armada
+                    saveRoutineToSupabase(lr).catch((e) => console.warn('[Sync to Cloud]', e));
+                  } else if (localEjsCount > cloudEjsCount) {
+                    // Proteger local: localmente hay más ejercicios/separadores
+                    saveRoutineToSupabase(lr).catch((e) => console.warn('[Sync to Cloud]', e));
+                  } else if (cloudEjsCount >= localEjsCount) {
+                    // La nube tiene la misma o más información: verificar fecha
+                    if (!lr.updated_at || new Date(cr.updated_at).getTime() > new Date(lr.updated_at).getTime()) {
+                      await saveRutina(cr);
+                    } else if (new Date(lr.updated_at).getTime() > new Date(cr.updated_at).getTime()) {
+                      saveRoutineToSupabase(lr).catch((e) => console.warn('[Sync to Cloud]', e));
+                    }
+                  }
+                }
+                // Si hay rutinas locales que no están en la nube, subirlas
+                for (const lr of localRuts) {
+                  if (!cloudRuts.some((cr) => cr.id === lr.id)) {
+                    saveRoutineToSupabase(lr).catch((e) => console.warn('[Upload local to Cloud]', e));
+                  }
+                }
+              } else if (localRuts && localRuts.length > 0) {
+                // Si la nube no tiene rutinas para este alumno pero localmente sí tenemos:
+                for (const lr of localRuts) {
+                  saveRoutineToSupabase(lr).catch((e) => console.warn('[Seed local to Cloud]', e));
                 }
               }
             }
@@ -199,7 +247,7 @@ export default function App() {
 
           const cloudGrupos = await fetchGroupsFromSupabase();
           if (cloudGrupos && cloudGrupos.length > 0) {
-            setGrupos(cloudGrupos);
+            allGrupos = cloudGrupos;
             for (const g of cloudGrupos) {
               await saveGrupo(g);
             }
@@ -209,13 +257,16 @@ export default function App() {
         }
       }
 
+      setAlumnos(allAlumnos);
+      setGrupos(allGrupos);
+
       // Pre-cargar rutinas en memoria caché
       const routinesCacheMap: Record<string, Rutina[]> = {};
       await Promise.all(
         allAlumnos.map(async (a) => {
           try {
             const ruts = await getRutinasByAlumno(a.id);
-            if (ruts.length > 0) {
+            if (ruts && ruts.length > 0) {
               routinesCacheMap[a.id] = ruts;
             }
           } catch (e) {
@@ -225,50 +276,83 @@ export default function App() {
       );
       setRoutinesByStudent((prev) => ({ ...prev, ...routinesCacheMap }));
 
-      // Default selected student if none
-      if (!selectedStudentId && allAlumnos.length > 0) {
-        const first = allAlumnos[0];
-        setSelectedStudentId(first.id);
-        setActiveDockStudents(allAlumnos.slice(0, 4));
-        const ruts = routinesCacheMap[first.id] || (await getRutinasByAlumno(first.id));
-        const ev = await getEvaluacionClinica(first.id);
+      // Determinar alumno activo desde localStorage si existe
+      let savedActiveStudentId: string | null = null;
+      try {
+        savedActiveStudentId = localStorage.getItem('fitpro_selected_student_id');
+      } catch {}
+
+      const activeId =
+        savedActiveStudentId && allAlumnos.some((a) => a.id === savedActiveStudentId)
+          ? savedActiveStudentId
+          : null;
+
+      if (activeId) {
+        setSelectedStudentId(activeId);
+        const ruts = routinesCacheMap[activeId] || (await getRutinasByAlumno(activeId));
+        const ev = await getEvaluacionClinica(activeId);
         setCurrentRutinas(ruts);
         setCurrentEvaluacion(ev);
-      } else if (selectedStudentId) {
-        setActiveDockStudents((prev) =>
-          prev.map((docAlm) => allAlumnos.find((a) => a.id === docAlm.id) || docAlm)
-        );
+      } else {
+        setSelectedStudentId(null);
+        setCurrentRutinas([]);
+        setCurrentEvaluacion(null);
       }
 
+      // Restaurar alumnos de sala si estaban activos durante la sesión actual (persiste al recargar F5)
+      let savedDockIds: string[] = [];
+      try {
+        const raw = localStorage.getItem('fitpro_dock_student_ids');
+        if (raw) savedDockIds = JSON.parse(raw);
+      } catch {}
+
+      if (Array.isArray(savedDockIds) && savedDockIds.length > 0) {
+        const restored = savedDockIds
+          .map((id) => allAlumnos.find((a) => a.id === id))
+          .filter((a): a is Alumno => Boolean(a));
+        setActiveDockStudents(restored);
+      } else {
+        setActiveDockStudents([]);
+      }
+
+      isInitialLoadedRef.current = true;
       setLoading(false);
     } catch (err) {
       console.error('Failed to load local DB:', err);
+      isInitialLoadedRef.current = true;
       setLoading(false);
     }
-  }, [selectedStudentId]);
+  }, []);
 
   useEffect(() => {
     loadData();
-    const unsubscribe = subscribeToDBChanges(() => {
-      loadData();
-    });
-    return () => unsubscribe();
   }, [loadData]);
 
   const handleLogin = (user: AuthUser) => {
+    isInitialLoadedRef.current = true;
     setCurrentUser(user);
+    setActiveView('home');
+    setActiveDockStudents([]);
+    setSelectedStudentId(null);
     try {
       localStorage.setItem('fitpro_auth_user', JSON.stringify(user));
+      localStorage.setItem('fitpro_active_view', 'home');
+      localStorage.removeItem('fitpro_selected_student_id');
+      localStorage.removeItem('fitpro_dock_student_ids'); // La sala inicia vacía en el nuevo login
     } catch {}
     showToast('success', `Bienvenido, ${user.name}`);
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
+    setActiveView('home');
+    setActiveDockStudents([]);
+    setSelectedStudentId(null);
     try {
       localStorage.removeItem('fitpro_auth_user');
       localStorage.removeItem('fitpro_active_view');
       localStorage.removeItem('fitpro_selected_student_id');
+      localStorage.removeItem('fitpro_dock_student_ids');
     } catch {}
     showToast('info', 'Sesión cerrada');
   };
@@ -276,47 +360,80 @@ export default function App() {
   const selectedStudent = alumnos.find((a) => a.id === selectedStudentId) || null;
 
   const handleSelectStudent = async (alumno: Alumno, view: 'rutina' | 'evaluacion') => {
-    setSelectedStudentId(alumno.id);
-    setActiveView(view);
-
-    if (!activeDockStudents.some((a) => a.id === alumno.id)) {
-      if (activeDockStudents.length < 8) {
-        setActiveDockStudents((prev) => [...prev, alumno]);
+    setActiveDockStudents((prev) => {
+      let updated: Alumno[];
+      if (prev.some((a) => a.id === alumno.id)) {
+        updated = prev;
+      } else if (prev.length < 8) {
+        updated = [...prev, alumno];
       } else {
-        setActiveDockStudents((prev) => [...prev.slice(1), alumno]);
+        updated = [...prev.slice(1), alumno];
       }
+      try {
+        localStorage.setItem('fitpro_dock_student_ids', JSON.stringify(updated.map((a) => a.id)));
+      } catch {}
+      return updated;
+    });
+
+    const cachedRuts = routinesByStudent[alumno.id];
+    if (cachedRuts && cachedRuts.length > 0) {
+      setCurrentRutinas(cachedRuts);
     }
 
-    // Carga de rutinas y evaluación
     try {
       const [ruts, evalClinica] = await Promise.all([
-        getRutinasByAlumno(alumno.id),
+        cachedRuts ? Promise.resolve(cachedRuts) : getRutinasByAlumno(alumno.id),
         getEvaluacionClinica(alumno.id)
       ]);
+      setSelectedStudentId(alumno.id);
+      setActiveView(view);
       setCurrentRutinas(ruts);
       setCurrentEvaluacion(evalClinica);
       setRoutinesByStudent((prev) => ({ ...prev, [alumno.id]: ruts }));
+      try {
+        localStorage.setItem('fitpro_selected_student_id', alumno.id);
+        localStorage.setItem('fitpro_active_view', view);
+      } catch {}
     } catch (err) {
       console.error(err);
+      setSelectedStudentId(alumno.id);
+      setActiveView(view);
+      try {
+        localStorage.setItem('fitpro_selected_student_id', alumno.id);
+        localStorage.setItem('fitpro_active_view', view);
+      } catch {}
     }
   };
 
   const handleToggleDock = (alumno: Alumno) => {
-    const isDocked = activeDockStudents.some((a) => a.id === alumno.id);
-    if (isDocked) {
-      setActiveDockStudents((prev) => prev.filter((a) => a.id !== alumno.id));
-    } else {
-      if (activeDockStudents.length < 8) {
-        setActiveDockStudents((prev) => [...prev, alumno]);
+    setActiveDockStudents((prev) => {
+      let updated: Alumno[];
+      const isDocked = prev.some((a) => a.id === alumno.id);
+      if (isDocked) {
+        updated = prev.filter((a) => a.id !== alumno.id);
       } else {
-        setActiveDockStudents((prev) => [...prev.slice(1), alumno]);
+        if (prev.length < 8) {
+          updated = [...prev, alumno];
+        } else {
+          updated = [...prev.slice(1), alumno];
+        }
       }
-    }
+      try {
+        localStorage.setItem('fitpro_dock_student_ids', JSON.stringify(updated.map((a) => a.id)));
+      } catch {}
+      return updated;
+    });
   };
 
   const handleRemoveFromDock = (studentId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setActiveDockStudents((prev) => prev.filter((a) => a.id !== studentId));
+    setActiveDockStudents((prev) => {
+      const updated = prev.filter((a) => a.id !== studentId);
+      try {
+        localStorage.setItem('fitpro_dock_student_ids', JSON.stringify(updated.map((a) => a.id)));
+      } catch {}
+      return updated;
+    });
   };
 
   const handleCreateNewRoutine = async (alumnoId: string): Promise<Rutina> => {
@@ -349,6 +466,7 @@ export default function App() {
               series: '3',
               repeticiones: '10',
               carga: '14 kg',
+              carga_p2: '16 kg',
               pausa: '60s',
               observaciones_dosificacion: 'Mantener tronco vertical y control excéntrico.'
             }
@@ -361,14 +479,17 @@ export default function App() {
     if (isSupabaseConfigured()) {
       saveRoutineToSupabase(newRoutine).catch((err) => console.warn('[Supabase]', err));
     }
+
     setRoutinesByStudent((prev) => {
       const list = prev[alumnoId] || [];
       return { ...prev, [alumnoId]: [...list.filter((r) => r.id !== newRoutine.id), newRoutine] };
     });
+
     setCurrentRutinas((prev) => {
       const filtered = prev.filter((r) => r.id !== newRoutine.id);
       return [...filtered, newRoutine];
     });
+
     return newRoutine;
   };
 
@@ -381,6 +502,7 @@ export default function App() {
         const updated = idx >= 0 ? list.map((r) => (r.id === rutina.id ? rutina : r)) : [...list, rutina];
         return { ...prev, [rutina.alumno_id]: updated };
       });
+
       setCurrentRutinas((prev) => {
         const idx = prev.findIndex((r) => r.id === rutina.id);
         if (idx >= 0) {
@@ -435,9 +557,9 @@ export default function App() {
     if (isSupabaseConfigured()) {
       const res = await saveStudentToSupabase(created);
       if (res.success) {
-        showToast('success', `✓ Alumno "${created.nombre} ${created.apellido}" guardado y sincronizado`);
+        showToast('success', `✓ Alumno "${created.nombre} ${created.apellido}" guardado`);
       } else {
-        showToast('error', `⚠️ Guardado localmente, error en nube: ${res.error || 'Error'}`);
+        showToast('error', `⚠️ Guardado localmente, error nube: ${res.error || 'Error'}`);
       }
     } else {
       showToast('success', `Alumno guardado en este dispositivo`);
@@ -453,6 +575,9 @@ export default function App() {
 
   const handleEditStudent = async (updatedAlumno: Alumno) => {
     await saveAlumno(updatedAlumno);
+    setAlumnos((prev) => prev.map((a) => (a.id === updatedAlumno.id ? updatedAlumno : a)));
+    setActiveDockStudents((prev) => prev.map((a) => (a.id === updatedAlumno.id ? updatedAlumno : a)));
+
     if (isSupabaseConfigured()) {
       const res = await saveStudentToSupabase(updatedAlumno);
       if (res.success) {
@@ -460,8 +585,9 @@ export default function App() {
       } else {
         showToast('error', `⚠️ Error en Supabase: ${res.error || 'Error'}`);
       }
+    } else {
+      showToast('success', `✓ Datos del alumno actualizados`);
     }
-    await loadData();
   };
 
   const handleDeleteStudent = async (studentId: string) => {
@@ -506,6 +632,10 @@ export default function App() {
     setRoutinesByStudent({});
     setStudentActiveDays({});
     setStudentActiveRoutines({});
+    try {
+      localStorage.removeItem('fitpro_dock_student_ids');
+      localStorage.removeItem('fitpro_selected_student_id');
+    } catch {}
 
     if (isSupabaseConfigured()) {
       await clearAllStudentsFromSupabase();
@@ -545,16 +675,16 @@ export default function App() {
   const handleReassignStudentGroup = async (alumnoId: string, newGrupoId: string) => {
     const target = alumnos.find((a) => a.id === alumnoId);
     if (target) {
-      await saveAlumno({
+      const updated = {
         ...target,
         grupo_id: newGrupoId,
         updated_at: new Date().toISOString()
-      });
-      await loadData();
+      };
+      await saveAlumno(updated);
+      setAlumnos((prev) => prev.map((a) => (a.id === alumnoId ? updated : a)));
     }
   };
 
-  // Payment Handlers (Guarda en localStorage y actualiza el alumno)
   const handleSavePayment = async (pagoData: Omit<PagoCuota, 'id' | 'created_at'>) => {
     try {
       const newPago: PagoCuota = {
@@ -614,13 +744,13 @@ export default function App() {
     );
   }
 
-  // Si no hay usuario autenticado, muestra la pantalla de login
   if (!currentUser) {
     return <AuthScreen onLogin={handleLogin} defaultEmail="jonalippo@gmail.com" />;
   }
 
   return (
     <div className="min-h-screen bg-[#090D16] text-slate-100 flex flex-col selection:bg-emerald-500 selection:text-white">
+      {/* Top Header */}
       <Header
         activeView={activeView}
         onNavigate={(view) => setActiveView(view)}
@@ -631,7 +761,8 @@ export default function App() {
       />
 
       {/* Main Viewport Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-0 pt-5 pb-24 overflow-x-hidden">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-3 sm:px-6 pt-5 pb-24 overflow-x-hidden">
+        {/* Mobile quick tabs */}
         <div className="md:hidden flex items-center gap-1.5 mb-4 p-1 rounded-2xl bg-slate-900 border border-slate-800 text-xs shadow-sm">
           <button
             onClick={() => setActiveView('home')}
@@ -671,7 +802,7 @@ export default function App() {
           </button>
         </div>
 
-        {/* Vista 0: Dashboard Home */}
+        {/* View 0: Dashboard Home */}
         {activeView === 'home' && (
           <DashboardHome
             alumnos={alumnos}
@@ -683,7 +814,7 @@ export default function App() {
           />
         )}
 
-        {/* View 1: Alumnos Directory & Gym Floor Hub */}
+        {/* View 1: Alumnos Directory */}
         {activeView === 'alumnos' && (
           <StudentList
             alumnos={alumnos}
@@ -705,7 +836,7 @@ export default function App() {
           />
         )}
 
-        {/* View 2: Grupos & Turnos Management */}
+        {/* View 2: Grupos & Turnos */}
         {activeView === 'grupos' && (
           <GroupManager
             grupos={grupos}
@@ -720,69 +851,66 @@ export default function App() {
         )}
 
         {/* View 3: Rutina Interactive Spreadsheet */}
-        {activeView === 'rutina' && (
-          <div>
-            {activeDockStudents.map((dockAlm) => {
-              const isSelected = dockAlm.id === selectedStudentId;
-              const studentRuts =
-                routinesByStudent[dockAlm.id] ||
-                (isSelected ? currentRutinas.filter((r) => r.alumno_id === dockAlm.id) : []);
-
-              return (
-                <div key={dockAlm.id} className={isSelected ? 'block' : 'hidden'}>
-                  <RoutineSpreadsheet
-                    alumno={dockAlm}
-                    rutinas={studentRuts}
-                    evaluacion={isSelected ? currentEvaluacion : null}
-                    allAlumnos={alumnos}
-                    savedActiveBlockId={studentActiveDays[dockAlm.id]}
-                    onActiveBlockChange={(blockId) =>
-                      setStudentActiveDays((prev) => ({ ...prev, [dockAlm.id]: blockId }))
-                    }
-                    savedActiveRoutineId={studentActiveRoutines[dockAlm.id]}
-                    onActiveRoutineChange={(routineId) =>
-                      setStudentActiveRoutines((prev) => ({ ...prev, [dockAlm.id]: routineId }))
-                    }
-                    onSaveRoutine={handleSaveRoutine}
-                    onCreateNewRoutine={handleCreateNewRoutine}
-                    onDeleteRoutine={handleDeleteRoutine}
-                    onBackToAlumnos={() => setActiveView('alumnos')}
-                    onSwitchStudent={(alm) => handleSelectStudent(alm, 'rutina')}
-                    onOpenEvaluation={() => setActiveView('evaluacion')}
-                  />
-                </div>
-              );
-            })}
-
-            {selectedStudent && !activeDockStudents.some((a) => a.id === selectedStudent.id) && (
-              <RoutineSpreadsheet
-                alumno={selectedStudent}
-                rutinas={
-                  routinesByStudent[selectedStudent.id] ||
-                  currentRutinas.filter((r) => r.alumno_id === selectedStudent.id)
-                }
-                evaluacion={currentEvaluacion}
-                allAlumnos={alumnos}
-                savedActiveBlockId={studentActiveDays[selectedStudent.id]}
-                onActiveBlockChange={(blockId) =>
-                  setStudentActiveDays((prev) => ({ ...prev, [selectedStudent.id]: blockId }))
-                }
-                savedActiveRoutineId={studentActiveRoutines[selectedStudent.id]}
-                onActiveRoutineChange={(routineId) =>
-                  setStudentActiveRoutines((prev) => ({ ...prev, [selectedStudent.id]: routineId }))
-                }
-                onSaveRoutine={handleSaveRoutine}
-                onCreateNewRoutine={handleCreateNewRoutine}
-                onDeleteRoutine={handleDeleteRoutine}
-                onBackToAlumnos={() => setActiveView('alumnos')}
-                onSwitchStudent={(alm) => handleSelectStudent(alm, 'rutina')}
-                onOpenEvaluation={() => setActiveView('evaluacion')}
-              />
-            )}
+        {activeView === 'rutina' && !selectedStudent && (
+          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-8 text-center max-w-md mx-auto my-12">
+            <Users className="w-10 h-10 text-emerald-400 mx-auto mb-3 opacity-80" />
+            <h3 className="text-base font-bold text-white mb-1">Ningún alumno seleccionado</h3>
+            <p className="text-xs text-slate-400 mb-5">
+              Para ver o planificar una rutina, selecciona un alumno desde la lista o súmalo a la sala activa.
+            </p>
+            <button
+              onClick={() => setActiveView('alumnos')}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow transition"
+            >
+              Ir a Lista de Alumnos
+            </button>
           </div>
         )}
 
-        {/* View 4: Evaluación Clínica "El Iceberg" */}
+        {activeView === 'rutina' && selectedStudent && (
+          <RoutineSpreadsheet
+            key={selectedStudent.id}
+            alumno={selectedStudent}
+            rutinas={
+              routinesByStudent[selectedStudent.id] ||
+              currentRutinas.filter((r) => String(r.alumno_id) === String(selectedStudent.id))
+            }
+            evaluacion={currentEvaluacion}
+            allAlumnos={alumnos}
+            savedActiveBlockId={studentActiveDays[selectedStudent.id]}
+            onActiveBlockChange={(blockId) =>
+              setStudentActiveDays((prev) => ({ ...prev, [selectedStudent.id]: blockId }))
+            }
+            savedActiveRoutineId={studentActiveRoutines[selectedStudent.id]}
+            onActiveRoutineChange={(routineId) =>
+              setStudentActiveRoutines((prev) => ({ ...prev, [selectedStudent.id]: routineId }))
+            }
+            onSaveRoutine={handleSaveRoutine}
+            onCreateNewRoutine={handleCreateNewRoutine}
+            onDeleteRoutine={handleDeleteRoutine}
+            onBackToAlumnos={() => setActiveView('alumnos')}
+            onSwitchStudent={(alm) => handleSelectStudent(alm, 'rutina')}
+            onOpenEvaluation={() => setActiveView('evaluacion')}
+          />
+        )}
+
+        {/* View 4: Evaluación Clínica */}
+        {activeView === 'evaluacion' && !selectedStudent && (
+          <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-8 text-center max-w-md mx-auto my-12">
+            <Activity className="w-10 h-10 text-emerald-400 mx-auto mb-3 opacity-80" />
+            <h3 className="text-base font-bold text-white mb-1">Ningún alumno seleccionado</h3>
+            <p className="text-xs text-slate-400 mb-5">
+              Para registrar una evaluación clínica, selecciona un alumno desde el directorio.
+            </p>
+            <button
+              onClick={() => setActiveView('alumnos')}
+              className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow transition"
+            >
+              Ir a Lista de Alumnos
+            </button>
+          </div>
+        )}
+
         {activeView === 'evaluacion' && selectedStudent && (
           <div className="space-y-4 pb-24">
             <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900/60 border border-slate-800/80 px-3.5 py-2.5 rounded-2xl">
@@ -912,7 +1040,7 @@ export default function App() {
           </div>
         )}
 
-        {/* View 5: Pantalla de Pagos & Métricas Financieras */}
+        {/* View 5: Pantalla de Pagos */}
         {activeView === 'pagos' && (
           <PaymentsManager
             alumnos={alumnos}

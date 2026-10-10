@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Alumno, Grupo, Rutina, EvaluacionClinica, SeguimientoDiario, BloqueRutina, EjercicioRutina } from '../types';
+import { Alumno, Grupo, Rutina, EvaluacionClinica, SeguimientoDiario, BloqueRutina, EjercicioRutina, PagoCuota } from '../types';
 
 // ============================================================================
 // CREDENTIAL HELPERS & VALIDATION
@@ -50,17 +50,27 @@ export const isSupabaseConfigured = (): boolean => {
 export const supabase: SupabaseClient | null = (() => {
   try {
     if (!isSupabaseConfigured()) {
+      if (typeof window !== 'undefined') {
+        console.warn('%c[Supabase] NO CONFIGURADO (Usando IndexedDB local):', 'color: #f59e0b; font-weight: bold;', {
+          url: rawSupabaseUrl || '(vacío o no detectado por Vite)',
+          keyPresent: Boolean(rawSupabaseAnonKey)
+        });
+      }
       return null;
     }
     const url = cleanUrl(rawSupabaseUrl);
     const key = cleanEnvValue(rawSupabaseAnonKey);
-    return createClient(url, key, {
+    const client = createClient(url, key, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },
     });
+    if (typeof window !== 'undefined') {
+      console.log('%c[Supabase] CONECTADO A LA NUBE:', 'color: #10b981; font-weight: bold;', { url });
+    }
+    return client;
   } catch (err) {
     console.warn('[Supabase] No se pudo inicializar Supabase, usando IndexedDB local:', err);
     return null;
@@ -68,7 +78,7 @@ export const supabase: SupabaseClient | null = (() => {
 })();
 
 // ============================================================================
-// DATA SANITIZATION (PREVIENE ERROR 22007 "invalid input syntax for type date: ''")
+// DATA SANITIZATION (PREVENTS POSTGRESQL "invalid input syntax for type date: ''")
 // ============================================================================
 
 function sanitizeDate(d?: string | null): string | null {
@@ -121,6 +131,7 @@ export function sanitizeAlumnoForSupabase(alumno: Alumno) {
     fecha_pago_cuota: sanitizeDate(alumno.fecha_pago_cuota),
     fecha_vencimiento_cuota: sanitizeDate(alumno.fecha_vencimiento_cuota),
     cuota_al_dia: alumno.cuota_al_dia !== false,
+    ultimo_monto_pago: Number(alumno.ultimo_monto_pago) || 0,
 
     alerta_lesion_activa: sanitizeStr(alumno.alerta_lesion_activa),
     zona_dolor_principal: sanitizeStr(alumno.zona_dolor_principal),
@@ -142,7 +153,44 @@ export function sanitizeRutinaForSupabase(rutina: Rutina) {
     activa: rutina.activa !== false,
     orden: Number(rutina.orden) || 1,
     notas_generales: sanitizeStr(rutina.notas_generales),
-    updated_at: new Date().toISOString(),
+    updated_at: rutina.updated_at || new Date().toISOString(),
+  };
+}
+
+// Normalizador de ejercicios para asegurar que separadores y campos se reconstruyan exactamente
+function normalizeEjercicioFromDb(ej: any): EjercicioRutina {
+  const isSep = Boolean(
+    ej.es_separador ||
+    (typeof ej.ejercicio === 'string' && (ej.ejercicio.includes('SEPARADOR') || ej.ejercicio.startsWith('—')))
+  );
+
+  let subtitulo = (ej.subtitulo_bloque || '').trim();
+  if (isSep && !subtitulo && ej.ejercicio) {
+    const raw = String(ej.ejercicio);
+    const match = raw.match(/^—\s*SEPARADOR(?::\s*(.*?))?\s*—$/i);
+    if (match && match[1]) {
+      subtitulo = match[1].trim();
+    } else if (raw !== '— SEPARADOR —' && raw !== '— SEPARADOR DE BLOQUE —') {
+      subtitulo = raw.replace(/^—+\s*/, '').replace(/\s*—+$/, '').replace(/^SEPARADOR:\s*/i, '').trim();
+    }
+  }
+
+  return {
+    id: String(ej.id),
+    bloque_id: String(ej.bloque_id),
+    orden: Number(ej.orden) || 1,
+    ejercicio: isSep ? (subtitulo ? `— SEPARADOR: ${subtitulo} —` : '— SEPARADOR DE BLOQUE —') : (ej.ejercicio || ''),
+    series: isSep ? '' : (ej.series ? String(ej.series).trim() : ''),
+    repeticiones: isSep ? '' : (ej.repeticiones ? String(ej.repeticiones).trim() : ''),
+    carga: isSep ? '' : (ej.carga ? String(ej.carga).trim() : ''),
+    carga_p2: isSep ? '' : (ej.carga_p2 ? String(ej.carga_p2).trim() : ''),
+    pausa: isSep ? '' : (ej.pausa ? String(ej.pausa).trim() : ''),
+    rpe_objetivo: isSep ? '' : (ej.rpe_objetivo ? String(ej.rpe_objetivo).trim() : ''),
+    tipo_cadena: isSep ? undefined : (ej.tipo_cadena || undefined),
+    observaciones_dosificacion: isSep ? '' : (ej.observaciones_dosificacion ? String(ej.observaciones_dosificacion).trim() : ''),
+    video_url: isSep ? '' : (ej.video_url ? String(ej.video_url).trim() : ''),
+    es_separador: isSep,
+    subtitulo_bloque: subtitulo
   };
 }
 
@@ -179,7 +227,6 @@ export async function saveStudentToSupabase(
   try {
     const sanitized = sanitizeAlumnoForSupabase(alumno);
 
-    // Asegurar que el grupo exista en Supabase antes de insertar al alumno
     if (sanitized.grupo_id) {
       try {
         await supabase.from('grupos').upsert(
@@ -197,12 +244,10 @@ export async function saveStudentToSupabase(
       }
     }
 
-    console.log('[Supabase] Enviando alumno a la tabla alumnos:', sanitized);
     let { error } = await supabase
       .from('alumnos')
       .upsert(sanitized, { onConflict: 'id' });
 
-    // Si la base de datos rechaza grupo_id por clave foránea, reintentar con null
     if (error && error.message && error.message.includes('alumnos_grupo_id_fkey')) {
       console.warn('[Supabase] Clave foránea de grupo_id no encontrada. Reintentando con grupo_id null...');
       const fallback = { ...sanitized, grupo_id: null };
@@ -214,7 +259,6 @@ export async function saveStudentToSupabase(
       console.error('[Supabase] Error devuelto por PostgreSQL:', error);
       return { success: false, error: error.message };
     }
-    console.log('[Supabase] ✓ Alumno guardado exitosamente en la nube.');
     return { success: true };
   } catch (err: any) {
     console.error('[Supabase] Excepción de red al guardar alumno:', err);
@@ -325,62 +369,81 @@ export async function deleteGroupFromSupabase(grupoId: string): Promise<boolean>
 export async function fetchRoutinesFromSupabase(alumnoId: string): Promise<Rutina[] | null> {
   if (!supabase) return null;
   try {
-    const { data, error } = await supabase
-      .from('rutinas')
-      .select(`
-        *,
-        bloques:bloques_rutina (
-          *,
-          ejercicios:ejercicios_rutina (*)
-        )
-      `)
-      .eq('alumno_id', alumnoId)
-      .order('orden', { ascending: true });
-
-    if (!error && data && data.length > 0) {
-      return data as Rutina[];
-    }
-
+    // 1. Obtener rutinas del alumno
     const { data: ruts, error: rError } = await supabase
       .from('rutinas')
       .select('*')
       .eq('alumno_id', alumnoId)
       .order('orden', { ascending: true });
 
-    if (rError || !ruts || ruts.length === 0) return [];
+    if (rError) {
+      console.warn('[Supabase] Error fetching rutinas:', rError.message);
+      return [];
+    }
 
-    const rutIds = ruts.map((r) => r.id);
-    const { data: blks } = await supabase
+    if (!ruts || ruts.length === 0) return [];
+
+    const rutIds = ruts.map((r) => String(r.id));
+
+    // 2. Obtener bloques de esas rutinas
+    const { data: blks, error: bError } = await supabase
       .from('bloques_rutina')
       .select('*')
       .in('rutina_id', rutIds)
       .order('orden', { ascending: true });
 
-    const blkIds = (blks || []).map((b) => b.id);
-    const { data: ejs } = await supabase
-      .from('ejercicios_rutina')
-      .select('*')
-      .in('bloque_id', blkIds)
-      .order('orden', { ascending: true });
+    if (bError) {
+      console.warn('[Supabase] Error fetching bloques_rutina:', bError.message);
+    }
 
-    const ejsByBlock: Record<string, any[]> = {};
-    (ejs || []).forEach((e) => {
-      if (!ejsByBlock[e.bloque_id]) ejsByBlock[e.bloque_id] = [];
-      ejsByBlock[e.bloque_id].push(e);
+    const validBlks = blks || [];
+    const blkIds = validBlks.map((b) => String(b.id));
+
+    // 3. Obtener ejercicios de esos bloques
+    let ejs: any[] = [];
+    if (blkIds.length > 0) {
+      const { data: fetchedEjs, error: eError } = await supabase
+        .from('ejercicios_rutina')
+        .select('*')
+        .in('bloque_id', blkIds)
+        .order('orden', { ascending: true });
+
+      if (eError) {
+        console.warn('[Supabase] Error fetching ejercicios_rutina:', eError.message);
+      } else {
+        ejs = fetchedEjs || [];
+      }
+    }
+
+    // 4. Mapear y reconstruir estructura jerárquica
+    const ejsByBlock: Record<string, EjercicioRutina[]> = {};
+    ejs.forEach((e) => {
+      const bKey = String(e.bloque_id);
+      if (!ejsByBlock[bKey]) ejsByBlock[bKey] = [];
+      ejsByBlock[bKey].push(normalizeEjercicioFromDb(e));
+    });
+
+    Object.keys(ejsByBlock).forEach((bid) => {
+      ejsByBlock[bid].sort((a, b) => (Number(a.orden) || 0) - (Number(b.orden) || 0));
     });
 
     const blksByRoutine: Record<string, any[]> = {};
-    (blks || []).forEach((b) => {
-      if (!blksByRoutine[b.rutina_id]) blksByRoutine[b.rutina_id] = [];
-      blksByRoutine[b.rutina_id].push({
+    validBlks.forEach((b) => {
+      const rKey = String(b.rutina_id);
+      if (!blksByRoutine[rKey]) blksByRoutine[rKey] = [];
+      blksByRoutine[rKey].push({
         ...b,
-        ejercicios: ejsByBlock[b.id] || []
+        ejercicios: ejsByBlock[String(b.id)] || []
       });
+    });
+
+    Object.keys(blksByRoutine).forEach((rid) => {
+      blksByRoutine[rid].sort((a, b) => (Number(a.orden) || 0) - (Number(b.orden) || 0));
     });
 
     return ruts.map((r) => ({
       ...r,
-      bloques: blksByRoutine[r.id] || []
+      bloques: blksByRoutine[String(r.id)] || []
     })) as Rutina[];
   } catch (err) {
     console.warn('[Supabase] Connection error fetching rutinas:', err);
@@ -395,7 +458,7 @@ export async function saveRoutineToSupabase(
     return { success: false, error: 'Supabase no está configurado.' };
   }
   try {
-    // 1. Guardar cabecera de la Rutina
+    // 1. Guardar cabecera de la Rutina respetando el updated_at exacto local
     const sanitizedRutina = sanitizeRutinaForSupabase(rutina);
     const { error: rutError } = await supabase
       .from('rutinas')
@@ -403,40 +466,103 @@ export async function saveRoutineToSupabase(
 
     if (rutError) throw rutError;
 
-    // 2. Guardar Bloques & Ejercicios
+    // 2. Sincronizar y limpiar Bloques & Ejercicios
     if (rutina.bloques && Array.isArray(rutina.bloques)) {
-      for (const bloque of rutina.bloques) {
+      const activeBlockIds = rutina.bloques.map((b) => String(b.id));
+
+      // 2a. Guardar cada bloque y sus ejercicios
+      for (let bIdx = 0; bIdx < rutina.bloques.length; bIdx++) {
+        const bloque = rutina.bloques[bIdx];
+        const blockOrder = Number(bloque.orden) || (bIdx + 1);
+
         const { error: blkError } = await supabase
           .from('bloques_rutina')
           .upsert({
             id: String(bloque.id),
             rutina_id: String(rutina.id),
-            nombre_sub_pestana: String(bloque.nombre_sub_pestana || 'Día 1').trim(),
-            orden: Number(bloque.orden) || 1
+            nombre_sub_pestana: String(bloque.nombre_sub_pestana || `Día ${bIdx + 1}`).trim(),
+            orden: blockOrder
           }, { onConflict: 'id' });
 
         if (blkError) throw blkError;
 
-        if (bloque.ejercicios && Array.isArray(bloque.ejercicios)) {
-          for (const ej of bloque.ejercicios) {
-            const { error: ejError } = await supabase
-              .from('ejercicios_rutina')
-              .upsert({
-                id: String(ej.id),
-                bloque_id: String(bloque.id),
-                orden: Number(ej.orden) || 1,
-                ejercicio: sanitizeStr(ej.ejercicio) || 'Ejercicio',
-                series: sanitizeStr(ej.series) || '3',
-                repeticiones: sanitizeStr(ej.repeticiones) || '10',
-                carga: sanitizeStr(ej.carga),
-                pausa: sanitizeStr(ej.pausa) || '60s',
-                rpe_objetivo: sanitizeStr(ej.rpe_objetivo),
-                tipo_cadena: sanitizeStr(ej.tipo_cadena),
-                observaciones_dosificacion: sanitizeStr(ej.observaciones_dosificacion),
-                video_url: sanitizeStr(ej.video_url)
-              }, { onConflict: 'id' });
+        const currentEjercicios = Array.isArray(bloque.ejercicios) ? bloque.ejercicios : [];
+        const activeEjIds = currentEjercicios.map((e) => String(e.id));
 
-            if (ejError) throw ejError;
+        // Upsert de los ejercicios actuales garantizando no violar restricciones NOT NULL de Postgres
+        for (let eIdx = 0; eIdx < currentEjercicios.length; eIdx++) {
+          const ej = currentEjercicios[eIdx];
+          const calculatedOrder = Number(ej.orden) || (eIdx + 1);
+
+          const isSep = Boolean(
+            ej.es_separador ||
+            (typeof ej.ejercicio === 'string' && (ej.ejercicio.includes('SEPARADOR') || ej.ejercicio.startsWith('—')))
+          );
+
+          let ejercicioStr = '';
+          if (isSep) {
+            const subTitle = (ej.subtitulo_bloque || '').trim();
+            ejercicioStr = subTitle ? `— SEPARADOR: ${subTitle} —` : '— SEPARADOR DE BLOQUE —';
+          } else {
+            ejercicioStr = (ej.ejercicio || '').trim() || 'Ejercicio';
+          }
+
+          // Postgres tiene restricciones NOT NULL en ejercicio, series, repeticiones y pausa
+          const { error: ejError } = await supabase
+            .from('ejercicios_rutina')
+            .upsert({
+              id: String(ej.id),
+              bloque_id: String(bloque.id),
+              orden: calculatedOrder,
+              ejercicio: ejercicioStr,
+              series: isSep ? '' : (ej.series ? String(ej.series).trim() : ''),
+              repeticiones: isSep ? '' : (ej.repeticiones ? String(ej.repeticiones).trim() : ''),
+              carga: isSep ? '' : (ej.carga ? String(ej.carga).trim() : ''),
+              carga_p2: isSep ? '' : (ej.carga_p2 ? String(ej.carga_p2).trim() : ''),
+              pausa: isSep ? '' : (ej.pausa ? String(ej.pausa).trim() : ''),
+              rpe_objetivo: isSep ? '' : (ej.rpe_objetivo ? String(ej.rpe_objetivo).trim() : ''),
+              tipo_cadena: isSep ? '' : (ej.tipo_cadena ? String(ej.tipo_cadena).trim() : ''),
+              observaciones_dosificacion: isSep ? '' : (ej.observaciones_dosificacion ? String(ej.observaciones_dosificacion).trim() : ''),
+              video_url: isSep ? '' : (ej.video_url ? String(ej.video_url).trim() : '')
+            }, { onConflict: 'id' });
+
+          if (ejError) throw ejError;
+        }
+
+        // Limpiar ejercicios huérfanos/eliminados en Supabase para este bloque
+        if (activeEjIds.length > 0) {
+          const { data: existingEjs } = await supabase
+            .from('ejercicios_rutina')
+            .select('id')
+            .eq('bloque_id', String(bloque.id));
+
+          if (existingEjs && existingEjs.length > 0) {
+            const ejsToDelete = existingEjs
+              .filter((ee) => !activeEjIds.includes(ee.id))
+              .map((ee) => ee.id);
+
+            if (ejsToDelete.length > 0) {
+              await supabase.from('ejercicios_rutina').delete().in('id', ejsToDelete);
+            }
+          }
+        }
+      }
+
+      // 2b. Eliminar de Supabase los bloques huérfanos eliminados por el usuario
+      if (activeBlockIds.length > 0) {
+        const { data: existingBlocks } = await supabase
+          .from('bloques_rutina')
+          .select('id')
+          .eq('rutina_id', String(rutina.id));
+
+        if (existingBlocks && existingBlocks.length > 0) {
+          const blocksToDelete = existingBlocks
+            .filter((eb) => !activeBlockIds.includes(eb.id))
+            .map((eb) => eb.id);
+
+          if (blocksToDelete.length > 0) {
+            await supabase.from('ejercicios_rutina').delete().in('bloque_id', blocksToDelete);
+            await supabase.from('bloques_rutina').delete().in('id', blocksToDelete);
           }
         }
       }
@@ -464,6 +590,85 @@ export async function deleteRoutineFromSupabase(rutinaId: string): Promise<boole
     return true;
   } catch (err) {
     console.warn('[Supabase] Connection error deleting rutina:', err);
+    return false;
+  }
+}
+
+// ============================================================================
+// PAGOS & CUOTAS MENSUALES
+// ============================================================================
+
+export async function fetchPagosFromSupabase(): Promise<PagoCuota[] | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('pagos')
+      .select('*')
+      .order('fecha_pago', { ascending: false });
+
+    if (error) {
+      console.warn('[Supabase] Error fetching pagos:', error.message);
+      return null;
+    }
+    return (data || []) as PagoCuota[];
+  } catch (err) {
+    console.warn('[Supabase] Connection error fetching pagos:', err);
+    return null;
+  }
+}
+
+export async function savePagoToSupabase(
+  pago: PagoCuota
+): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) {
+    return { success: false, error: 'Supabase no está configurado.' };
+  }
+  try {
+    const record = {
+      id: String(pago.id),
+      alumno_id: String(pago.alumno_id),
+      alumno_nombre: sanitizeStr(pago.alumno_nombre) || 'Alumno',
+      grupo_id: sanitizeStr(pago.grupo_id),
+      grupo_nombre: sanitizeStr(pago.grupo_nombre),
+      monto: Number(pago.monto) || 0,
+      fecha_pago: sanitizeDate(pago.fecha_pago) || new Date().toISOString().split('T')[0],
+      fecha_vencimiento: sanitizeDate(pago.fecha_vencimiento) || new Date().toISOString().split('T')[0],
+      mes_correspondiente: sanitizeStr(pago.mes_correspondiente) || 'Actual',
+      metodo_pago: sanitizeStr(pago.metodo_pago) || 'efectivo',
+      notas: sanitizeStr(pago.notas),
+      created_at: pago.created_at || new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('pagos')
+      .upsert(record, { onConflict: 'id' });
+
+    if (error) {
+      console.warn('[Supabase] Error saving pago:', error.message);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    console.error('[Supabase] Error saving pago:', err);
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+export async function deletePagoFromSupabase(id: string): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    const { error } = await supabase
+      .from('pagos')
+      .delete()
+      .eq('id', id);
+
+    if (error) {
+      console.warn('[Supabase] Error deleting pago:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Supabase] Connection error deleting pago:', err);
     return false;
   }
 }
