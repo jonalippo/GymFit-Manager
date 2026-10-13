@@ -260,7 +260,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
       repeticiones: '10',
       carga: '',
       carga_p2: '',
-      pausa: '60s',
+      pausa: '',
       observaciones_dosificacion: ''
     };
 
@@ -322,7 +322,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
           repeticiones: '10',
           carga: '',
           carga_p2: '',
-          pausa: '60s',
+          pausa: '',
           observaciones_dosificacion: ''
         }
       ];
@@ -396,7 +396,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     const newBlock: BloqueRutina = {
       id: newBlockId,
       rutina_id: localRoutine.id,
-      nombre_sub_pestana: `Día ${blockNum}: Bloque de Entrenamiento`,
+      nombre_sub_pestana: `Día ${blockNum}: `,
       orden: blockNum,
       ejercicios: [
         {
