@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Alumno, Grupo, ZonaDolor, DecisionTerapeutica } from '../types';
 import { getCuotaInfo, computeFullMonthExpiration } from '../utils/cuotaUtils';
 import {
@@ -32,7 +32,8 @@ import {
   FileText,
   CreditCard,
   LayoutGrid,
-  List
+  List,
+  ArrowUpDown
 } from 'lucide-react';
 
 interface StudentListProps {
@@ -83,6 +84,24 @@ export const StudentList: React.FC<StudentListProps> = ({
     setViewMode(mode);
     try {
       localStorage.setItem('fitpro_students_view_mode', mode);
+    } catch {}
+  };
+
+  // Criterio de ordenamiento alfabético: por defecto 'nombre-asc' (A-Z por Nombre)
+  const [sortOrder, setSortOrder] = useState<'nombre-asc' | 'apellido-asc' | 'nombre-desc' | 'recientes'>(() => {
+    try {
+      const saved = localStorage.getItem('fitpro_students_sort_order');
+      if (saved && ['nombre-asc', 'apellido-asc', 'nombre-desc', 'recientes'].includes(saved)) {
+        return saved as any;
+      }
+    } catch {}
+    return 'nombre-asc';
+  });
+
+  const handleSetSortOrder = (order: 'nombre-asc' | 'apellido-asc' | 'nombre-desc' | 'recientes') => {
+    setSortOrder(order);
+    try {
+      localStorage.setItem('fitpro_students_sort_order', order);
     } catch {}
   };
 
@@ -165,15 +184,42 @@ export const StudentList: React.FC<StudentListProps> = ({
     return Math.max(0, Math.floor(diff / (365.25 * 24 * 60 * 60 * 1000)));
   };
 
-  const filteredAlumnos = alumnos.filter((alumno) => {
-    const matchesSearch =
-      `${alumno.nombre} ${alumno.apellido} ${alumno.dni || ''} ${alumno.telefono}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (alumno.alerta_lesion_activa && alumno.alerta_lesion_activa.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (alumno.direccion && alumno.direccion.toLowerCase().includes(searchTerm.toLowerCase()));
+  // Filtrado y ordenamiento alfabético automático
+  const filteredAlumnos = useMemo(() => {
+    const list = alumnos.filter((alumno) => {
+      const matchesSearch =
+        `${alumno.nombre} ${alumno.apellido} ${alumno.dni || ''} ${alumno.telefono}`.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (alumno.alerta_lesion_activa && alumno.alerta_lesion_activa.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (alumno.direccion && alumno.direccion.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    const matchesGroup = selectedGrupoId === 'todos' || alumno.grupo_id === selectedGrupoId;
-    return matchesSearch && matchesGroup;
-  });
+      const matchesGroup = selectedGrupoId === 'todos' || alumno.grupo_id === selectedGrupoId;
+      return matchesSearch && matchesGroup;
+    });
+
+    return [...list].sort((a, b) => {
+      if (sortOrder === 'apellido-asc') {
+        const apeA = (a.apellido || '').trim();
+        const apeB = (b.apellido || '').trim();
+        const cmp = apeA.localeCompare(apeB, 'es', { sensitivity: 'base' });
+        if (cmp !== 0) return cmp;
+        return (a.nombre || '').trim().localeCompare((b.nombre || '').trim(), 'es', { sensitivity: 'base' });
+      }
+      if (sortOrder === 'nombre-desc') {
+        const nomA = `${a.nombre || ''} ${a.apellido || ''}`.trim();
+        const nomB = `${b.nombre || ''} ${b.apellido || ''}`.trim();
+        return nomB.localeCompare(nomA, 'es', { sensitivity: 'base' });
+      }
+      if (sortOrder === 'recientes') {
+        const dateA = a.created_at || a.fecha_inicio || '';
+        const dateB = b.created_at || b.fecha_inicio || '';
+        return dateB.localeCompare(dateA);
+      }
+      // 'nombre-asc' (Por defecto: Alfabético A-Z por Nombre y Apellido)
+      const nomA = `${a.nombre || ''} ${a.apellido || ''}`.trim();
+      const nomB = `${b.nombre || ''} ${b.apellido || ''}`.trim();
+      return nomA.localeCompare(nomB, 'es', { sensitivity: 'base' });
+    });
+  }, [alumnos, searchTerm, selectedGrupoId, sortOrder]);
 
   const totalActivos = alumnos.filter((a) => a.estado_activo).length;
   const conLesion = alumnos.filter((a) => a.alerta_lesion_activa || (a.dolor_eva_actual && a.dolor_eva_actual > 0)).length;
@@ -379,25 +425,25 @@ export const StudentList: React.FC<StudentListProps> = ({
     <div className="space-y-4 sm:space-y-5">
       {/* Metrics Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3.5">
-        <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
+        <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm flex flex-col items-center justify-center">
           <p className="text-[10px] sm:text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total Atletas</p>
           <p className="text-xl sm:text-2xl font-bold text-white font-mono mt-0.5">{totalActivos}</p>
           <span className="text-[10px] text-emerald-400 font-mono">Activos en sistema</span>
         </div>
 
-        <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
+        <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm flex flex-col items-center justify-center">
           <p className="text-[10px] sm:text-[11px] font-semibold text-slate-400 uppercase tracking-wider">En Sala (Dock)</p>
-          <p className="text-xl sm:text-2xl font-bold text-emerald-400 font-mono mt-0.5">{enSalaCount} / 8</p>
+          <p className="text-xl sm:text-2xl font-bold text-emerald-400 font-mono mt-0.5">{enSalaCount}</p>
           <span className="text-[10px] text-emerald-500/80 font-mono">Acceso rápido</span>
         </div>
 
-        <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
+        <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm flex flex-col items-center justify-center">
           <p className="text-[10px] sm:text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Con Molestia / Alerta</p>
           <p className="text-xl sm:text-2xl font-bold text-amber-400 font-mono mt-0.5">{conLesion}</p>
           <span className="text-[10px] text-amber-400/80 font-mono">Seguimiento especial</span>
         </div>
 
-        <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
+        <div className="p-3 sm:p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm flex flex-col items-center justify-center">
           <p className="text-[10px] sm:text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Cuotas al Día</p>
           <p className="text-xl sm:text-2xl font-bold text-teal-400 font-mono mt-0.5">
             {alumnos.filter((a) => a.cuota_al_dia !== false).length}
@@ -451,7 +497,7 @@ export const StudentList: React.FC<StudentListProps> = ({
         </div>
       </div>
 
-      {/* Search and Filters Bar with View Switcher (Cards vs List) */}
+      {/* Search and Filters Bar with View Switcher (Cards vs List) & Sorting Selector */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5 p-3 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-sm">
         {/* Búsqueda Global */}
         <div className="relative flex-1">
@@ -473,7 +519,7 @@ export const StudentList: React.FC<StudentListProps> = ({
           )}
         </div>
 
-        {/* Selector de Grupo, Apartado de Grupos & Conmutador Tarjetas / Lista */}
+        {/* Selector de Grupo, Orden Alfabético & Conmutador Tarjetas / Lista */}
         <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 flex-wrap">
           <select
             value={selectedGrupoId}
@@ -487,6 +533,22 @@ export const StudentList: React.FC<StudentListProps> = ({
               </option>
             ))}
           </select>
+
+          {/* Selector de Orden Alfabético */}
+          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1">
+            <ArrowUpDown className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+            <select
+              value={sortOrder}
+              onChange={(e) => handleSetSortOrder(e.target.value as any)}
+              className="bg-transparent text-xs text-slate-200 font-semibold focus:outline-none cursor-pointer py-1"
+              title="Criterio de ordenamiento"
+            >
+              <option value="nombre-asc" className="bg-slate-900 text-white">A-Z (Nombre)</option>
+              <option value="apellido-asc" className="bg-slate-900 text-white">A-Z (Apellido)</option>
+              <option value="nombre-desc" className="bg-slate-900 text-white">Z-A (Inverso)</option>
+              <option value="recientes" className="bg-slate-900 text-white">Más recientes</option>
+            </select>
+          </div>
 
           {onNavigateToGroups && (
             <button
@@ -686,7 +748,18 @@ export const StudentList: React.FC<StudentListProps> = ({
           <table className="w-full text-left text-xs border-collapse">
             <thead>
               <tr className="bg-slate-950 text-slate-400 font-bold border-b border-slate-800 uppercase tracking-wider text-[11px] font-mono">
-                <th className="py-3 px-3 min-w-[200px]">ALUMNO</th>
+                <th
+                  className="py-3 px-3 min-w-[200px] cursor-pointer hover:text-white transition select-none"
+                  onClick={() => {
+                    handleSetSortOrder(sortOrder === 'nombre-asc' ? 'nombre-desc' : 'nombre-asc');
+                  }}
+                  title="Clic para cambiar orden alfabético"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span>ALUMNO</span>
+                    <ArrowUpDown className={`w-3 h-3 ${sortOrder.startsWith('nombre') ? 'text-emerald-400' : 'text-slate-500'}`} />
+                  </div>
+                </th>
                 <th className="py-3 px-3 min-w-[140px]">CONTACTO</th>
                 <th className="py-3 px-3 min-w-[140px]">TURNO / GRUPO</th>
                 <th className="py-3 px-3 min-w-[120px]">CUOTA</th>

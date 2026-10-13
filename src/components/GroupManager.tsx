@@ -163,13 +163,13 @@ export const GroupManager: React.FC<GroupManagerProps> = ({
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
+        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm flex flex-col items-center justify-center">
           <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Total de Grupos</p>
           <p className="text-2xl font-bold text-white font-mono mt-0.5">{grupos.length}</p>
           <span className="text-[10px] text-emerald-400 font-mono">Grupos activos</span>
         </div>
 
-        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
+        <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm flex flex-col items-center justify-center">
           <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Alumnos Asignados</p>
           <p className="text-2xl font-bold text-emerald-400 font-mono mt-0.5">
             {alumnos.filter((a) => a.grupo_id).length} / {alumnos.length}
@@ -177,7 +177,7 @@ export const GroupManager: React.FC<GroupManagerProps> = ({
           <span className="text-[10px] text-slate-400 font-mono">Con grupo asignado</span>
         </div>
 
-        <div className="col-span-2 sm:col-span-1 p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm">
+        <div className="col-span-2 sm:col-span-1 p-3.5 rounded-2xl bg-slate-900/90 border border-slate-800 shadow-sm flex flex-col items-center justify-center">
           <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Promedio por Grupo</p>
           <p className="text-2xl font-bold text-blue-400 font-mono mt-0.5">
             {grupos.length > 0 ? (alumnos.length / grupos.length).toFixed(1) : 0}
