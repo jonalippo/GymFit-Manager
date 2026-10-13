@@ -85,6 +85,15 @@ export const EXERCISE_LIBRARY: LibraryExercise[] = [
     precaucion_clinica: 'No utilizar en fases agudas de tendinopatía rotuliana. Requiere progresión gradual.',
     ajuste_biomecanico_sugerido: 'Torso y muslos en línea continua; descender flexionando rodillas mientras la cadera permanece extendida.'
   },
+  {
+    nombre: 'Sentadilla Isometrica',
+    patron: 'sentadilla',
+    cadena: 'CCC',
+    dificultad: 'inicial',
+    musculos_principales: 'Recto Femoral, Tendón Rotuliano',
+    precaucion_clinica: 'No utilizar en fases agudas de tendinopatía rotuliana. Requiere progresión gradual.',
+    ajuste_biomecanico_sugerido: 'Mantener angulo 90° de rodilla durante 20-30 segundos.'
+  },
 
   // ============================================================================
   // 2. BISAGRA DE CADERA / DOMINANCIA POSTERIOR
@@ -219,6 +228,69 @@ export const EXERCISE_LIBRARY: LibraryExercise[] = [
     precaucion_clinica: 'Suspender si hay inestabilidad o chasquidos dolorosos fémoro-patelares.',
     ajuste_biomecanico_sugerido: 'Mantener cadera nivelada en cada paso; evitar inclinaciones pélvicas laterales (Trendelenburg).'
   },
+  {
+    nombre: 'Zancadas frontales alternadas',
+    patron: 'lunge_unilateral',
+    cadena: 'CCC',
+    dificultad: 'avanzado',
+    musculos_principales: 'Recto Femoral, Tendón Rotuliano',
+    precaucion_clinica: 'Suspender si hay inestabilidad o chasquidos dolorosos fémoro-patelares.',
+    ajuste_biomecanico_sugerido: 'Mantener cadera nivelada en cada paso; evitar inclinaciones pélvicas laterales'
+  },
+  {
+    nombre: 'Zancadas laterales con mancuerna',
+    patron: 'lunge_unilateral',
+    cadena: 'CCC',
+    dificultad: 'intermedio',
+    musculos_principales: 'Aductores, Glúteo Medio, Cuádriceps, Tobillo',
+    precaucion_clinica: 'Trabajo multiplanar esencial para deportistas; vigilar pinzamiento de cadera.',
+    ajuste_biomecanico_sugerido: 'Bajar lateralmente manteniendo talón de la pierna flexionada pegado al suelo; pierna estirada con punta arriba.'
+  },
+  {
+    nombre: 'Abducción de Cadera en Polea Baja o Banda Elástica',
+    patron: 'lunge_unilateral',
+    cadena: 'CCC',
+    dificultad: 'inicial',
+    musculos_principales: 'Glúteo Medio, Tensor de la Fascia Lata',
+    precaucion_clinica: 'Evitar compensaciones de tronco y pelvis; mantener columna neutra.',
+    ajuste_biomecanico_sugerido: 'Mantener pierna de apoyo ligeramente flexionada; elevar lateralmente la pierna hasta 45°.'
+  },
+  {
+    nombre: 'Aduccion de Cadera en Polea Baja o Banda Elástica',
+    patron: 'lunge_unilateral',
+    cadena: 'CCC',
+    dificultad: 'inicial',
+    musculos_principales: 'Aductores, Glúteo Mayor',
+    precaucion_clinica: 'Evitar compensaciones de tronco y pelvis; mantener columna neutra.',
+    ajuste_biomecanico_sugerido: 'Mantener pierna de apoyo ligeramente flexionada; cruzar la pierna hacia la línea media hasta 45°.'
+  },
+  {
+    nombre: 'Aduccion con fitball entre rodillas',
+    patron: 'lunge_unilateral',
+    cadena: 'CCC',
+    dificultad: 'inicial',
+    musculos_principales: 'Aductores, Glúteo Mayor',
+    precaucion_clinica: 'Evitar compensaciones de tronco y pelvis; mantener columna neutra.',
+    ajuste_biomecanico_sugerido: 'Mantener pierna de apoyo ligeramente flexionada; presionar la pelota hacia adentro con fuerza controlada.'
+  },
+  {
+    nombre: 'Gluteos en cuadrupedia con tobilleras',
+    patron: 'lunge_unilateral',
+    cadena: 'CCC',
+    dificultad: 'inicial',
+    musculos_principales: 'Glúteo Mayor, Glúteo Medio',
+    precaucion_clinica: 'Evitar compensaciones de tronco y pelvis; mantener columna neutra.',
+    ajuste_biomecanico_sugerido: 'Mantener pierna de apoyo ligeramente flexionada; elevar la pierna hacia atrás hasta 45°.'
+  },
+  {
+    nombre:'Gluteos en polea baja con tobilleras',
+    patron: 'lunge_unilateral',
+    cadena: 'CCC',
+    dificultad: 'inicial',
+    musculos_principales: 'Glúteo Mayor, Glúteo Medio',
+    precaucion_clinica: 'Evitar compensaciones de tronco y pelvis; mantener columna neutra.',
+    ajuste_biomecanico_sugerido: 'Mantener pierna de apoyo ligeramente flexionada; elevar la pierna hacia atrás hasta 45°.'
+  },
 
   // ============================================================================
   // 4. EMPUJE HORIZONTAL
@@ -230,6 +302,15 @@ export const EXERCISE_LIBRARY: LibraryExercise[] = [
     dificultad: 'intermedio',
     musculos_principales: 'Pectoral Mayor, Tríceps Braquial, Deltoides Anterior',
     precaucion_clinica: 'El agarre neutro abre el espacio subacromial reduciendo riesgo de pinzamiento.',
+    ajuste_biomecanico_sugerido: 'Codos a 45° respecto al torso; retracción y depresión escapular constante.'
+  },
+  {
+    nombre: 'Press de Banca Plano con Barra',
+    patron: 'empuje_horizontal',
+    cadena: 'CCA',
+    dificultad: 'intermedio',
+    musculos_principales: 'Pectoral Mayor, Tríceps Braquial, Deltoides Anterior',
+    precaucion_clinica: '',
     ajuste_biomecanico_sugerido: 'Codos a 45° respecto al torso; retracción y depresión escapular constante.'
   },
   {
@@ -268,6 +349,25 @@ export const EXERCISE_LIBRARY: LibraryExercise[] = [
     precaucion_clinica: 'Contraindicado en inestabilidad anterior de hombro o laxitud ligamentosa acromioclavicular.',
     ajuste_biomecanico_sugerido: 'Inclinación de 30° hacia adelante del torso; no descender más allá de los 90° de flexión de codo.'
   },
+  {
+    nombre: 'Aperturas planas con mancuernas con ligera flexión de codos',
+    patron: 'empuje_horizontal',
+    cadena: 'CCA',
+    dificultad: 'intermedio',
+    musculos_principales: 'Pectoral Mayor, Deltoides Anterior, Coracobraquial',
+    precaucion_clinica: '',
+    ajuste_biomecanico_sugerido: 'Codos con ligera semiflexión constante fija'
+  },
+  {
+    nombre: 'Aperturas inclinadas con mancuernas con ligera flexión de codos',
+    patron: 'empuje_horizontal',
+    cadena: 'CCA',
+    dificultad: 'intermedio',
+    musculos_principales: 'Pectoral Mayor, Deltoides Anterior, Coracobraquial',
+    precaucion_clinica: '',
+    ajuste_biomecanico_sugerido: 'Codos con ligera semiflexión constante fija'
+  },
+  
 
   // ============================================================================
   // 5. EMPUJE VERTICAL
@@ -300,13 +400,22 @@ export const EXERCISE_LIBRARY: LibraryExercise[] = [
     ajuste_biomecanico_sugerido: 'Glúteos y cuádriceps en máxima co-contracción isométrica para estabilizar la pelvis.'
   },
   {
-    nombre: 'Elevaciones Laterales en Polea Baja a la Altura de la Cadera',
+    nombre: 'Vuelos Laterales en Polea Baja a la Altura de la Cadera',
     patron: 'empuje_vertical',
     cadena: 'CCA',
     dificultad: 'inicial',
     musculos_principales: 'Deltoides Medio, Supraespinoso',
     precaucion_clinica: 'La polea provee curva de resistencia continua sin pico de palanca lesivo en el inicio.',
     ajuste_biomecanico_sugerido: 'Elevar en el plano escapular (30° adelantado) hasta los 85-90°, nunca por encima del hombro.'
+  },
+  {
+    nombre: 'Vuelos Frontales con mancuernas',
+    patron: 'empuje_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Deltoides frontal, Supraespinoso',
+    precaucion_clinica: '',
+    ajuste_biomecanico_sugerido: 'Elevar en el plano sagital hasta los 85-90°, nunca por encima del hombro.'
   },
   {
     nombre: 'Arnold Press con Mancuernas',
@@ -389,6 +498,15 @@ export const EXERCISE_LIBRARY: LibraryExercise[] = [
     ajuste_biomecanico_sugerido: 'Traccionar pensando en clavar los codos en los bolsillos del pantalón.'
   },
   {
+    nombre: 'Jalón al Pecho en Polea con Agarre supino',
+    patron: 'traccion_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Dorsal Ancho, Bíceps Braquial, Braquiorradial',
+    precaucion_clinica: 'Evitar si hay epitrocleítis (codo de golfista) o molestias en flexores de antebrazo.',
+    ajuste_biomecanico_sugerido: 'Agarre supino ancho de hombros.'
+  },
+  {
     nombre: 'Jalón Unilateral en Polea Alta con Agarre Neutro',
     patron: 'traccion_vertical',
     cadena: 'CCA',
@@ -423,6 +541,15 @@ export const EXERCISE_LIBRARY: LibraryExercise[] = [
     musculos_principales: 'Dorsal Ancho, Redondo Mayor, Tríceps (cabeza larga)',
     precaucion_clinica: 'Aísla el dorsal sin participación sustancial de los flexores del codo.',
     ajuste_biomecanico_sugerido: 'Torso inclinado 30°; empujar la barra hacia los muslos sin doblar los codos.'
+  },
+  {
+    nombre: 'Pullover con mancuernas (Brazos Semirrígidos)',
+    patron: 'traccion_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Dorsal Ancho, Redondo Mayor, Tríceps (cabeza larga)',
+    precaucion_clinica: 'Aísla el dorsal sin participación sustancial de los flexores del codo.',
+    ajuste_biomecanico_sugerido: 'En un banco plano, brazos semirrígidos, bajar la mancuerna hacia la cabeza y volver a la posición inicial'
   },
 
   // ============================================================================
@@ -465,7 +592,7 @@ export const EXERCISE_LIBRARY: LibraryExercise[] = [
     ajuste_biomecanico_sugerido: 'Extender brazo y pierna opuesta exhalando todo el aire; mantener contacto lumbar total.'
   },
   {
-    nombre: 'Paseo del Granjero Unilateral (Suitcase Carry)',
+    nombre: 'Caminata del Granjero Unilateral (Suitcase Carry)',
     patron: 'anti_rotacion_core',
     cadena: 'CCC',
     dificultad: 'intermedio',
@@ -483,12 +610,115 @@ export const EXERCISE_LIBRARY: LibraryExercise[] = [
     ajuste_biomecanico_sugerido: 'Comenzar con pelvis en retroversión activa; avanzar solo hasta donde se mantenga el abdomen apretado.'
   },
   {
-    nombre: 'Plancha Frontal RKC con Máxima Tensión Isométrica',
+    nombre: 'Plancha Frontal con Apoyo de Antebrazos y Pies',
     patron: 'anti_rotacion_core',
     cadena: 'CCC',
     dificultad: 'intermedio',
     musculos_principales: 'Core total, Glúteos, Cuádriceps',
     precaucion_clinica: 'Evita sostener planchas pasivas largas con caída pélvica. Son series cortas de 10-15 segundos a máxima potencia.',
     ajuste_biomecanico_sugerido: 'Jalar los codos hacia los dedos de los pies y apretar glúteos como si quisiera doblar la colchoneta.'
+  },
+
+    // ============================================================================
+  // 9. MIEMBRO SUPERIROR / PATRÓN DE EMPUJE Y TRACCIÓN / BICEPS Y TRICEPS
+  // ============================================================================
+  {
+    nombre: 'Curl de Bíceps con Barra Z (EZ Bar)',
+    patron: 'traccion_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Bíceps Braquial, Braquial Anterior, Braquiorradial',
+    precaucion_clinica: 'Evitar hiperextensión de codo; mantener muñeca neutra para no sobrecargar el túnel carpiano.',
+    ajuste_biomecanico_sugerido: 'Mantener codos pegados al torso; subir y bajar la barra de manera controlada sin balanceo.'
+  },
+  {
+    nombre: 'Curl de Bíceps con Mancuernas',
+    patron: 'traccion_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Bíceps Braquial, Braquial Anterior, Braquiorradial',
+    precaucion_clinica: 'Evitar hiperextensión de codo; mantener muñeca neutra para no sobrecargar el túnel carpiano.',
+    ajuste_biomecanico_sugerido: 'Mantener codos pegados al torso; subir y bajar la barra de manera controlada sin balanceo.'
+  },
+  {
+    nombre: 'Curl de Bíceps barra recta con agarre supino',
+    patron: 'traccion_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Bíceps Braquial, Braquial Anterior, Braquiorradial',
+    precaucion_clinica: 'Evitar hiperextensión de codo; mantener muñeca neutra para no sobrecargar el túnel carpiano.',
+    ajuste_biomecanico_sugerido: 'Mantener codos pegados al torso; subir y bajar la barra de manera controlada sin balanceo.'
+  },
+  {
+    nombre: 'Curl de Bíceps martillo con mancuernas',
+    patron: 'traccion_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Bíceps Braquial (cabeza larga y corta), Braquial Anterior, Braquiorradial (supinador largo)',
+    precaucion_clinica: 'Evitar hiperextensión de codo; mantener muñeca neutra para no sobrecargar el túnel carpiano.',
+    ajuste_biomecanico_sugerido: 'Mantener codos pegados al torso; subir y bajar mancuernas de manera controlada sin balanceo. Mantener agarre neutro (como si se diera un apretón de manos) durante todo el movimiento.'
+  },
+  {
+    nombre: 'Extensión de Tríceps en Polea Alta con Cuerda',
+    patron: 'empuje_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Tríceps Braquial (cabeza larga, lateral y medial), Ancóneo',
+    precaucion_clinica: 'Evitar hiperextensión de codo; mantener muñeca neutra para no sobrecargar el túnel carpiano.',
+    ajuste_biomecanico_sugerido: 'Mantener codos pegados al torso; empujar la cuerda hacia abajo de manera controlada sin balanceo. Separar ligeramente las manos al final del movimiento para un rango completo.'
+  },
+  {
+    nombre: 'Extensión de Tríceps con Mancuerna o disco por encima de la cabeza',
+    patron: 'empuje_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Tríceps Braquial (cabeza larga, lateral y medial), Ancóneo',
+    precaucion_clinica: 'Evitar hiperextensión de codo; mantener muñeca neutra para no sobrecargar el túnel carpiano.',
+    ajuste_biomecanico_sugerido: 'Mantener codos pegados al torso; empujar la mancuerna o disco hacia arriba de manera controlada sin balanceo. Mantener agarre neutro durante todo el movimiento.'
+  },
+  {
+    nombre: 'Fondos entre bancos',
+    patron: 'empuje_vertical',
+    cadena: 'CCC',
+    dificultad: 'intermedio',
+    musculos_principales: 'Tríceps Braquial, Pectoral Mayor, Deltoides Anterior',
+    precaucion_clinica: 'Evitar hiperextensión de codo; mantener muñeca neutra para no sobrecargar el túnel carpiano.',
+    ajuste_biomecanico_sugerido: 'Mantener codos pegados al torso; bajar el cuerpo de manera controlada.'
+  },
+  {
+    nombre: 'Press de Tríceps con barra',
+    patron: 'empuje_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Tríceps Braquial (cabeza larga, lateral y medial), Ancóneo',
+    precaucion_clinica: 'Evitar hiperextensión de codo; mantener muñeca neutra para no sobrecargar el túnel carpiano.',
+    ajuste_biomecanico_sugerido: 'Mantener codos pegados al torso; empujar la barra hacia arriba de manera controlada.'
+  },
+  {
+    nombre: 'Press de Tríceps con mancuernas',
+    patron: 'empuje_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Tríceps Braquial (cabeza larga, lateral y medial), Ancóneo',
+    precaucion_clinica: 'Evitar hiperextensión de codo; mantener muñeca neutra para no sobrecargar el túnel carpiano.',
+    ajuste_biomecanico_sugerido: 'Mantener codos pegados al torso; empujar las mancuernas hacia arriba de manera controlada.'
+  },
+  {
+    nombre: 'Press de Tríceps con barra Z (EZ Bar)',
+    patron: 'empuje_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Tríceps Braquial (cabeza larga, lateral y medial), Ancóneo',
+    precaucion_clinica: 'Evitar hiperextensión de codo; mantener muñeca neutra para no sobrecargar el túnel carpiano.',
+    ajuste_biomecanico_sugerido: 'Mantener codos pegados al torso; empujar la barra hacia arriba de manera controlada.'
+  },
+  {
+    nombre: 'Frances con mancuernas',
+    patron: 'empuje_vertical',
+    cadena: 'CCA',
+    dificultad: 'inicial',
+    musculos_principales: 'Tríceps Braquial (cabeza larga, lateral y medial), Ancóneo',
+    precaucion_clinica: 'Evitar hiperextensión de codo; mantener muñeca neutra para no sobrecargar el túnel carpiano.',
+    ajuste_biomecanico_sugerido: 'Mantener codos quietos; empujar las mancuernas hacia arriba de manera controlada.'
   }
 ];
