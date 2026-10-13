@@ -527,7 +527,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
     <div className="w-full max-w-full space-y-2.5 sm:space-y-4 pb-28 overflow-x-hidden">
       {/* 0. Barra superior con navegación */}
       <div className="flex items-center justify-between gap-2 bg-slate-900/90 border border-slate-800 p-2 sm:p-3.5 rounded-xl sm:rounded-2xl shadow-sm">
-        <div className="flex items-center gap-2 sm:gap-3 min-w-0 flex-1">
+        <div className="flex items-center gap-2 sm:gap-20 min-w-0 flex-1">
           <button
             onClick={onBackToAlumnos}
             className="inline-flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3.5 sm:py-2 rounded-lg sm:rounded-xl bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 text-xs font-bold transition shrink-0 active:scale-95 group shadow-sm"
@@ -538,10 +538,10 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
           </button>
 
           <div className="min-w-0 flex-1">
-            <h3 className="text-xs sm:text-base font-bold text-white truncate leading-tight">
+            <h3 className="text-xs sm:text-2xl font-bold text-white truncate leading-tight">
               {alumno.nombre} {alumno.apellido}
             </h3>
-            <p className="text-[10px] sm:text-[11px] text-slate-400 font-mono truncate leading-none mt-0.5">
+            <p className="text-[10px] sm:text-[14px] text-slate-400 font-mono truncate leading-none mt-0.5">
               {alumno.telefono}
             </p>
           </div>
@@ -836,7 +836,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
               <div className="w-full overflow-x-auto">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
-                    <tr className="bg-slate-950/80 text-slate-400 font-bold border-b border-slate-800/80 uppercase tracking-wider text-[11px] font-mono">
+                    <tr className="bg-neutral-600 text-emerald-400 font-bold border-b border-slate-800/80 uppercase tracking-wider text-[11px] md:text-[14px] font-mono">
                       <th className="py-2 sm:py-3 px-2 w-9 text-center">#</th>
                       <th className="py-2 sm:py-3 px-2.5 sm:px-3 min-w-[180px]">EJERCICIO</th>
                       <th className="py-2 sm:py-3 px-2 w-24 sm:w-28 min-w-[85px] text-center">SERIES</th>
@@ -864,16 +864,14 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                         return (
                           <tr
                             key={ej.id}
-                            className="bg-slate-900/90 border-y-2 border-emerald-500/40 hover:bg-slate-850 transition group"
+                            className="bg-slate-900/90 border-y-2 border-emerald-500/30 hover:bg-slate-850 transition group"
                           >
                             <td className="py-2 sm:py-2.5 px-2 text-center text-emerald-400 font-bold">
                               <Minus className="w-4 h-4 mx-auto text-emerald-400" />
                             </td>
                             <td colSpan={7} className="py-1.5 sm:py-2 px-2.5 sm:px-3">
                               <div className="flex items-center gap-2">
-                                <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 font-sans">
-                                  Separador de Bloque
-                                </span>
+                               
                                 <input
                                   type="text"
                                   value={ej.subtitulo_bloque || (ej.ejercicio && !ej.ejercicio.includes('SEPARADOR') ? ej.ejercicio : '')}
@@ -884,7 +882,7 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                                       ejercicio: val.trim() ? `— SEPARADOR: ${val.trim()} —` : '— SEPARADOR —'
                                     });
                                   }}
-                                  placeholder="Ej: BLOQUE 2: ZONA MEDIA / MIEMBRO INFERIOR..."
+                                  placeholder=""
                                   className="w-full bg-transparent font-sans font-extrabold text-white text-xs sm:text-sm uppercase tracking-wide focus:outline-none focus:bg-slate-950 px-2 py-1 rounded border border-transparent focus:border-emerald-500/50"
                                 />
                               </div>
