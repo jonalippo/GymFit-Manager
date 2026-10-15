@@ -15,7 +15,7 @@ export default defineConfig(() => {
       tailwindcss(),
       VitePWA({
         registerType: 'autoUpdate',
-        includeAssets: ['gymfit-logo.png'],
+        includeAssets: ['GymFitLogo01.webp', 'GymFitLogo01.svg', 'favicon.ico'],
         manifest: {
           id: '/',
           name: 'GymFit Manager',
@@ -28,27 +28,27 @@ export default defineConfig(() => {
           scope: '/',
           icons: [
             {
-              src: '/gymfit-logo.png',
+              src: '/GymFitLogo01.webp',
               sizes: '192x192',
-              type: 'image/png',
+              type: 'image/webp',
               purpose: 'any',
             },
             {
-              src: '/gymfit-logo.png',
+              src: '/GymFitLogo01.webp',
               sizes: '512x512',
-              type: 'image/png',
+              type: 'image/webp',
               purpose: 'any',
             },
             {
-              src: '/gymfit-logo.png',
+              src: '/GymFitLogo01.webp',
               sizes: '512x512',
-              type: 'image/png',
+              type: 'image/webp',
               purpose: 'maskable',
             },
           ],
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          globPatterns: ['**/*.{js,css,html,ico,png,webp,svg,woff,woff2}'],
         },
         devOptions: {
           enabled: true,

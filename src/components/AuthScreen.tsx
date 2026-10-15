@@ -128,18 +128,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, defaultEmail = 
       <div className="absolute bottom-10 right-10 w-[350px] h-[350px] bg-teal-500/10 blur-[100px] rounded-full pointer-events-none" />
 
       {/* Main Auth Container */}
-      <div className="w-full max-w-md z-10 space-y-4">
-        {/* Brand Header */}
-        <div className="text-center space-y-2">
-          {/* Logo Badge */}
+      <div className="w-full max-w-md z-10 space-y-4 flex flex-col items-center justify-center">
           <div className="inline-flex items-center justify-center ">
-           <img src="/gymfit-logo.png" alt="GymFitPro Logo" className="w-10 h-10 sm:w-28 sm:h-28" />
+           <img src="/GymFitLogo02.webp" alt="GymFit Logo" className="w-50 h-15 sm:w-70 sm:h-20" />
           </div>
-
-          <h1 className="font-display text-2xl sm:text-3xl font-black text-white tracking-tight pt-1">
-            GymFit<span className="text-emerald-400">Manager</span>
-          </h1>
-        </div>
 
         {/* Auth Card */}
         <div className="p-6 sm:p-8 rounded-3xl bg-slate-900/90 border border-slate-800 backdrop-blur-xl shadow-2xl space-y-5">

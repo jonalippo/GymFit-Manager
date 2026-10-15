@@ -256,8 +256,8 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
       bloque_id: activeBlock.id,
       orden: atIndex + 1,
       ejercicio: '',
-      series: '3',
-      repeticiones: '10',
+      series: '',
+      repeticiones: '',
       carga: '',
       carga_p2: '',
       pausa: '',
@@ -844,13 +844,13 @@ export const RoutineSpreadsheet: React.FC<RoutineSpreadsheetProps> = ({
                       <th className="py-1.5 sm:py-2.5 px-1 w-16 text-center text-emerald-400" title="Carga P1 (Semana 1-2 / Fase Inicial)">
                         <div className="flex flex-col items-center leading-none gap-0.5">
                           <span className="font-bold text-[11px] font-mono">P1</span>
-                          <span className="text-[9px] text-slate-500 font-medium tracking-normal font-sans">CARGA</span>
+                          <span className="text-[9px] text-emerald-500 font-medium tracking-normal font-sans">CARGA</span>
                         </div>
                       </th>
                       <th className="py-1.5 sm:py-2.5 px-1 w-16 text-center text-emerald-400" title="Carga P2 (Semana 3-4 / Progresión)">
                         <div className="flex flex-col items-center leading-none gap-0.5">
                           <span className="font-bold text-[11px] font-mono">P2</span>
-                          <span className="text-[9px] text-slate-500 font-medium tracking-normal font-sans">CARGA</span>
+                          <span className="text-[9px] text-emerald-500 font-medium tracking-normal font-sans">CARGA</span>
                         </div>
                       </th>
                       <th className="py-2 sm:py-3 px-1 w-16 text-center">PAUSA</th>
