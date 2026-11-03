@@ -216,7 +216,13 @@ export async function fetchStudentsFromSupabase(profesorId?: string): Promise<Al
       .order('nombre', { ascending: true });
 
     if (isOwnerProfesorId(profesorId)) {
-      query = query.or('profesor_id.eq.prof-1,profesor_id.eq.prof_jonalippo_gmail_com,profesor_id.is.null');
+      const { data: authData } = await supabase.auth.getUser();
+      const { data: ownerProfile } = authData.user?.email
+        ? await supabase.from('profesores').select('id').eq('email', authData.user.email).maybeSingle()
+        : { data: null };
+      const ownerId = ownerProfile?.id ? String(ownerProfile.id) : '';
+      const ownerFilter = ownerId ? `profesor_id.eq.${ownerId},` : '';
+      query = query.or(`${ownerFilter}profesor_id.eq.prof-1,profesor_id.eq.prof_jonalippo_gmail_com,profesor_id.is.null`);
     } else {
       query = query.eq('profesor_id', profesorId);
     }
@@ -331,7 +337,13 @@ export async function fetchGroupsFromSupabase(profesorId?: string): Promise<Grup
       .order('nombre_grupo', { ascending: true });
 
     if (isOwnerProfesorId(profesorId)) {
-      query = query.or('profesor_id.eq.prof-1,profesor_id.eq.prof_jonalippo_gmail_com,profesor_id.is.null');
+      const { data: authData } = await supabase.auth.getUser();
+      const { data: ownerProfile } = authData.user?.email
+        ? await supabase.from('profesores').select('id').eq('email', authData.user.email).maybeSingle()
+        : { data: null };
+      const ownerId = ownerProfile?.id ? String(ownerProfile.id) : '';
+      const ownerFilter = ownerId ? `profesor_id.eq.${ownerId},` : '';
+      query = query.or(`${ownerFilter}profesor_id.eq.prof-1,profesor_id.eq.prof_jonalippo_gmail_com,profesor_id.is.null`);
     } else {
       query = query.eq('profesor_id', profesorId);
     }
