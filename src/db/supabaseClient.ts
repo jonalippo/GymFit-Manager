@@ -216,13 +216,7 @@ export async function fetchStudentsFromSupabase(profesorId?: string): Promise<Al
       .order('nombre', { ascending: true });
 
     if (isOwnerProfesorId(profesorId)) {
-      const { data: authData } = await supabase.auth.getUser();
-      const { data: ownerProfile } = authData.user?.email
-        ? await supabase.from('profesores').select('id').eq('email', authData.user.email).maybeSingle()
-        : { data: null };
-      const ownerId = ownerProfile?.id ? String(ownerProfile.id) : '';
-      const ownerFilter = ownerId ? `profesor_id.eq.${ownerId},` : '';
-      query = query.or(`${ownerFilter}profesor_id.eq.prof-1,profesor_id.eq.prof_jonalippo_gmail_com,profesor_id.is.null`);
+      query = query.or('profesor_id.eq.prof-1,profesor_id.eq.prof_jonalippo_gmail_com,profesor_id.is.null');
     } else {
       query = query.eq('profesor_id', profesorId);
     }
@@ -337,13 +331,7 @@ export async function fetchGroupsFromSupabase(profesorId?: string): Promise<Grup
       .order('nombre_grupo', { ascending: true });
 
     if (isOwnerProfesorId(profesorId)) {
-      const { data: authData } = await supabase.auth.getUser();
-      const { data: ownerProfile } = authData.user?.email
-        ? await supabase.from('profesores').select('id').eq('email', authData.user.email).maybeSingle()
-        : { data: null };
-      const ownerId = ownerProfile?.id ? String(ownerProfile.id) : '';
-      const ownerFilter = ownerId ? `profesor_id.eq.${ownerId},` : '';
-      query = query.or(`${ownerFilter}profesor_id.eq.prof-1,profesor_id.eq.prof_jonalippo_gmail_com,profesor_id.is.null`);
+      query = query.or('profesor_id.eq.prof-1,profesor_id.eq.prof_jonalippo_gmail_com,profesor_id.is.null');
     } else {
       query = query.eq('profesor_id', profesorId);
     }
@@ -759,98 +747,6 @@ export async function deleteUserPermanentlyFromSupabase(profesorId: string): Pro
     console.warn('[Supabase] Exception deleting profesor:', err);
     return false;
   }
-}
-
-export async function importLocalBackupToSupabase(backup: any): Promise<{ counts: Record<string, number>; errors: string[] }> {
-  const counts: Record<string, number> = {};
-  const errors: string[] = [];
-  if (!supabase) return { counts, errors: ['Supabase no está configurado.'] };
-
-  const stores = backup?.stores;
-  if (!stores || !Array.isArray(stores.alumnos) || !Array.isArray(stores.rutinas)) {
-    return { counts, errors: ['El archivo no tiene el formato esperado o no contiene alumnos y rutinas.'] };
-  }
-
-  const { data: authData, error: authError } = await supabase.auth.getUser();
-  if (authError || !authData.user?.email) {
-    return { counts, errors: ['No se pudo identificar la sesión del administrador. Volvé a iniciar sesión e intentá de nuevo.'] };
-  }
-  const { data: ownerProfile, error: profileError } = await supabase
-    .from('profesores')
-    .select('id, organizacion_id')
-    .eq('email', authData.user.email)
-    .maybeSingle();
-  if (profileError || !ownerProfile?.id || !ownerProfile?.organizacion_id) {
-    return { counts, errors: ['No se encontró el perfil de profesor/organización del administrador en Supabase. No se importó ningún dato.'] };
-  }
-  const ownerProfessorId = String(ownerProfile.id);
-  const ownerOrganizationId = String(ownerProfile.organizacion_id);
-
-  const upsertInBatches = async (table: string, rows: any[], label = table, overwriteExisting = false) => {
-    let imported = 0;
-    for (let i = 0; i < rows.length; i += 100) {
-      const { error } = await supabase!.from(table).upsert(rows.slice(i, i + 100), {
-        onConflict: 'id',
-        ignoreDuplicates: !overwriteExisting,
-      });
-      if (error) errors.push(`${label}: ${error.message}`);
-      else imported += Math.min(100, rows.length - i);
-    }
-    counts[label] = imported;
-  };
-
-  const grupos = Array.isArray(stores.grupos) ? stores.grupos : [];
-  if (grupos.length) {
-    await upsertInBatches('grupos', grupos.map((g: any) => ({
-      ...g,
-      profesor_id: ownerProfessorId,
-      organizacion_id: ownerOrganizationId,
-      created_at: g.created_at || new Date().toISOString(),
-      updated_at: g.updated_at || new Date().toISOString(),
-    })), 'grupos');
-  }
-
-  const alumnos = stores.alumnos.map((a: any) => ({
-    ...sanitizeAlumnoForSupabase(a, ownerProfessorId),
-    profesor_id: ownerProfessorId,
-    organizacion_id: ownerOrganizationId,
-    grupo_id: a.grupo_id || null,
-  }));
-  await upsertInBatches('alumnos', alumnos, 'alumnos');
-
-  const rutinas = stores.rutinas as Rutina[];
-  await upsertInBatches('rutinas', rutinas.map((r) => ({
-    ...sanitizeRutinaForSupabase(r),
-    created_at: r.created_at || new Date().toISOString(),
-  })), 'rutinas');
-  const blocks = rutinas.flatMap((r) => (r.bloques || []).map((b) => ({
-    id: String(b.id), rutina_id: String(r.id),
-    nombre_sub_pestana: b.nombre_sub_pestana || 'Día',
-    orden: Number(b.orden) || 1,
-  })));
-  if (blocks.length) await upsertInBatches('bloques_rutina', blocks, 'bloques');
-
-  const exercises = rutinas.flatMap((r) => (r.bloques || []).flatMap((b) => (b.ejercicios || []).map((e) => {
-    const isSep = Boolean(e.es_separador);
-    return {
-      id: String(e.id), bloque_id: String(b.id), orden: Number(e.orden) || 1,
-      ejercicio: isSep
-        ? (e.subtitulo_bloque ? `â€” SEPARADOR: ${e.subtitulo_bloque} â€”` : 'â€” SEPARADOR DE BLOQUE â€”')
-        : (e.ejercicio || 'Ejercicio'),
-      series: e.series || '', repeticiones: e.repeticiones || '', carga: e.carga || '',
-      pausa: e.pausa || '', rpe_objetivo: e.rpe_objetivo || '',
-      tipo_cadena: e.tipo_cadena || null, observaciones_dosificacion: e.observaciones_dosificacion || '',
-      video_url: e.video_url || '',
-    };
-  })));
-  if (exercises.length) await upsertInBatches('ejercicios_rutina', exercises, 'ejercicios', true);
-
-  const evaluations = Array.isArray(stores.evaluaciones_clinicas) ? stores.evaluaciones_clinicas : [];
-  if (evaluations.length) await upsertInBatches('evaluaciones_clinicas', evaluations, 'evaluaciones');
-  const tracking = Array.isArray(stores.seguimiento_diario) ? stores.seguimiento_diario : [];
-  if (tracking.length) await upsertInBatches('seguimiento_diario', tracking, 'seguimientos');
-
-  return { counts, errors };
 }
 
 export async function checkIfUserIsActive(identifier: string): Promise<boolean> {

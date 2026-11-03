@@ -281,63 +281,96 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, defaultEmail = 
       return;
     }
 
+    if (!isOwnerEmail(cleanEmail)) {
+      const isActivo = await checkIfUserIsActive(cleanEmail);
+      if (!isActivo) {
+        setConfirmationEmail(cleanEmail);
+        setMode('awaiting_confirmation');
+        return;
+      }
+    }
+
     setIsLoading(true);
 
     try {
-      if (!supabase) {
-        setAuthError('El servicio de autenticación no está disponible. Intenta nuevamente cuando Supabase esté activo.');
-        return;
-      }
+      if (supabase) {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password
+        });
 
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password
-      });
+        if (error) {
+          console.warn('[Supabase Auth Error]', error.message);
 
-      if (error) {
-        console.warn('[Supabase Auth Error]', error.message);
-
-        if (error.message?.toLowerCase().includes('email not confirmed')) {
-          setAuthError('Primero confirma tu correo desde el enlace que te enviamos.');
-          return;
-        }
-
-        if (error.message?.toLowerCase().includes('invalid login credentials')) {
-          setAuthError('Correo o contraseña incorrectos. Si eliminaste esta cuenta, debes crearla nuevamente desde “Crear Cuenta Nueva”.');
-          return;
-        }
-
-        setAuthError(error.message || 'Error al iniciar sesión.');
-        return;
-      }
-
-      if (data?.user) {
-        if (!isOwnerEmail(cleanEmail)) {
-          const isActivo = await checkIfUserIsActive(data.user.id);
-          if (!isActivo) {
-            await supabase.auth.signOut();
+          if (error.message?.toLowerCase().includes('email not confirmed')) {
             setConfirmationEmail(cleanEmail);
             setMode('awaiting_confirmation');
-            setAuthError('Tu cuenta está pendiente de activación por el administrador o fue desactivada.');
+            setAuthError('Tu cuenta aún no ha sido confirmada por correo.');
             return;
           }
+
+          if (error.message?.toLowerCase().includes('invalid login credentials')) {
+            setAuthError('Credenciales incorrectas. Verifica tu correo y contraseña o pulsa "¿Olvidaste tu contraseña?".');
+            return;
+          }
+
+          setAuthError(error.message || 'Error al iniciar sesión.');
+          return;
         }
 
-        handleRememberEmail(cleanEmail);
-        const userId = data.user.id;
-        const userMetadata = data.user.user_metadata || {};
-        const userName =
-          userMetadata.full_name || (isOwnerEmail(cleanEmail) ? 'Jonatan Lippo' : cleanEmail.split('@')[0]);
-        const userGym = userMetadata.gym_name || 'Gimnasio';
+        if (data?.user) {
+          handleRememberEmail(cleanEmail);
+          const userId = data.user.id;
+          const userMetadata = data.user.user_metadata || {};
+          const userName =
+            userMetadata.full_name || (isOwnerEmail(cleanEmail) ? 'Jonatan Lippo' : cleanEmail.split('@')[0]);
+          const userGym = userMetadata.gym_name || 'Gimnasio';
 
-        onLogin({
-          id: isOwnerEmail(cleanEmail) ? 'prof-1' : userId,
-          name: userName,
-          email: cleanEmail,
-          role: 'admin_gimnasio',
-          gymName: userGym
-        });
+          const profId = isOwnerEmail(cleanEmail) ? 'prof-1' : `prof_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+          try {
+            await supabase.from('profesores').upsert({
+              id: profId,
+              auth_user_id: userId,
+              nombre: userName,
+              email: cleanEmail,
+              gym_name: userGym,
+              rol: 'admin_gimnasio',
+              activo: true
+            }, { onConflict: 'id' });
+          } catch (err) {
+            console.warn('[Supabase Profesor Sync]', err);
+          }
+
+          onLogin({
+            id: isOwnerEmail(cleanEmail) ? 'prof-1' : userId,
+            name: userName,
+            email: cleanEmail,
+            role: 'admin_gimnasio',
+            gymName: userGym
+          });
+          return;
+        }
       }
+
+      // La cuenta administradora nunca puede usar el modo local: requiere
+      // validación de contraseña por Supabase.
+      if (isOwnerEmail(cleanEmail)) {
+        setAuthError('No se puede validar la contraseña del administrador sin conexión a Supabase. Intenta nuevamente cuando el servicio esté disponible.');
+        return;
+      }
+
+      // Modo Local / Fallback Seguro (con aislamiento estricto por usuario)
+      handleRememberEmail(cleanEmail);
+      const isolatedId = getProfesorIdForEmail(cleanEmail);
+      const displayName = isOwnerEmail(cleanEmail) ? 'Jonatan Lippo' : cleanEmail.split('@')[0];
+
+      onLogin({
+        id: isolatedId,
+        name: displayName,
+        email: cleanEmail,
+        role: 'admin_gimnasio',
+        gymName: 'Centro de Entrenamiento'
+      });
     } catch (err: any) {
       console.error('[Login Error]', err);
       setAuthError('Ocurrió un error inesperado al iniciar sesión.');
