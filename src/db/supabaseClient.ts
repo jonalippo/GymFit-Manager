@@ -826,7 +826,7 @@ export async function importLocalBackupToSupabase(backup: any): Promise<{ counts
       series: e.series || '', repeticiones: e.repeticiones || '', carga: e.carga || '',
       pausa: e.pausa || '', rpe_objetivo: e.rpe_objetivo || '',
       tipo_cadena: e.tipo_cadena || null, observaciones_dosificacion: e.observaciones_dosificacion || '',
-      video_url: e.video_url || '', created_at: new Date().toISOString(),
+      video_url: e.video_url || '',
     };
   })));
   if (exercises.length) await upsertInBatches('ejercicios_rutina', exercises, 'ejercicios');
