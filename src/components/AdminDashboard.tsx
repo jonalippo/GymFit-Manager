@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { Profesor, PagoCuota, Alumno } from '../types';
 import {
   ShieldCheck,
@@ -30,6 +30,7 @@ interface AdminDashboardProps {
   onToggleStatus: (userId: string, nuevoEstado: boolean) => Promise<void>;
   onDeleteUser: (userId: string) => Promise<void>;
   onRefresh: () => Promise<void>;
+  onImportBackup?: (file: File) => Promise<{ alumnos: number; rutinas: number }>;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -39,7 +40,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   alumnos = [],
   onToggleStatus,
   onDeleteUser,
-  onRefresh
+  onRefresh,
+  onImportBackup
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
@@ -49,6 +51,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [userToToggle, setUserToToggle] = useState<{ user: Profesor; targetStatus: boolean } | null>(null);
   const [userToDelete, setUserToDelete] = useState<Profesor | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [backupStatus, setBackupStatus] = useState<string | null>(null);
+  const [isImportingBackup, setIsImportingBackup] = useState(false);
+  const backupInputRef = useRef<HTMLInputElement>(null);
+
+  const handleBackupFile = async (file?: File) => {
+    if (!file || !onImportBackup) return;
+    setIsImportingBackup(true);
+    setBackupStatus('Validando e importando copia...');
+    try {
+      const backup = JSON.parse(await file.text());
+      const alumnos = backup?.stores?.alumnos;
+      const rutinas = backup?.stores?.rutinas;
+      if (!Array.isArray(alumnos) || !Array.isArray(rutinas)) {
+        throw new Error('El archivo no contiene las listas de alumnos y rutinas.');
+      }
+      const confirmed = window.confirm(
+        `La copia contiene ${alumnos.length} alumnos y ${rutinas.length} rutinas. Se agregarán los registros que falten; si un ID ya existe en producción, se conservará el existente. ¿Continuar?`
+      );
+      if (!confirmed) return;
+      const result = await onImportBackup(file);
+      setBackupStatus(`Importación terminada. Alumnos: ${result.alumnos}; rutinas: ${result.rutinas}.`);
+    } catch (error: any) {
+      setBackupStatus(error?.message || 'No se pudo importar la copia.');
+    } finally {
+      setIsImportingBackup(false);
+      if (backupInputRef.current) backupInputRef.current.value = '';
+    }
+  };
 
   // Verifica si es el propietario titular principal
   const isMasterAdmin = (email?: string) => {
@@ -192,16 +222,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
 
-        <button
-          onClick={handleRefreshClick}
-          disabled={isRefreshing}
-          className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition active:scale-95 shrink-0"
-          title="Actualizar datos desde la base de datos"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} />
-          <span>Actualizar Datos</span>
-        </button>
+        <div className="flex flex-wrap gap-2">
+          {onImportBackup && (
+            <>
+              <input ref={backupInputRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => handleBackupFile(e.target.files?.[0])} />
+              <button onClick={() => backupInputRef.current?.click()} disabled={isImportingBackup} className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-600 border border-emerald-600 text-white text-xs font-semibold disabled:opacity-50">
+                {isImportingBackup ? 'Importando...' : 'Importar copia local'}
+              </button>
+            </>
+          )}
+          <button onClick={handleRefreshClick} disabled={isRefreshing} className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold transition active:scale-95 shrink-0" title="Actualizar datos desde la base de datos">
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-emerald-400' : ''}`} />
+            <span>Actualizar Datos</span>
+          </button>
+        </div>
       </div>
+      {backupStatus && <div className="p-3 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200">{backupStatus}</div>}
 
       {/* SECCIÓN 2: CONTROL DE USUARIOS Y PROFESORES */}
       <div className="space-y-4">

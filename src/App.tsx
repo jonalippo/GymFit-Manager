@@ -44,7 +44,8 @@ import {
   supabase,
   fetchUsersForAdmin,
   toggleUserStatusInSupabase,
-  deleteUserPermanentlyFromSupabase
+  deleteUserPermanentlyFromSupabase,
+  importLocalBackupToSupabase
 } from './db/supabaseClient';
 
 import {
@@ -271,6 +272,19 @@ export default function App() {
     } else {
       showToast('error', 'No se pudo eliminar el usuario de Supabase');
     }
+  };
+
+  const handleImportLocalBackup = async (file: File) => {
+    const backup = JSON.parse(await file.text());
+    const result = await importLocalBackupToSupabase(backup);
+    if (result.errors.length > 0) {
+      throw new Error(`Importación parcial. Cargados: ${JSON.stringify(result.counts)}. Errores: ${result.errors.slice(0, 3).join(' | ')}`);
+    }
+    await loadData();
+    return {
+      alumnos: result.counts.alumnos || 0,
+      rutinas: result.counts.rutinas || 0,
+    };
   };
 
   // Carga de datos local e inicialización con Aislamiento Estricto por Profesor
@@ -1259,6 +1273,7 @@ export default function App() {
             onToggleStatus={handleToggleUserStatus}
             onDeleteUser={handleDeleteUserPermanently}
             onRefresh={loadProfesores}
+            onImportBackup={handleImportLocalBackup}
           />
         )}
       </main>

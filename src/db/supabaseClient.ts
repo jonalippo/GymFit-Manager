@@ -749,6 +749,75 @@ export async function deleteUserPermanentlyFromSupabase(profesorId: string): Pro
   }
 }
 
+export async function importLocalBackupToSupabase(backup: any): Promise<{ counts: Record<string, number>; errors: string[] }> {
+  const counts: Record<string, number> = {};
+  const errors: string[] = [];
+  if (!supabase) return { counts, errors: ['Supabase no está configurado.'] };
+
+  const stores = backup?.stores;
+  if (!stores || !Array.isArray(stores.alumnos) || !Array.isArray(stores.rutinas)) {
+    return { counts, errors: ['El archivo no tiene el formato esperado o no contiene alumnos y rutinas.'] };
+  }
+
+  const upsertInBatches = async (table: string, rows: any[], label = table) => {
+    let imported = 0;
+    for (let i = 0; i < rows.length; i += 100) {
+      const { error } = await supabase!.from(table).upsert(rows.slice(i, i + 100), {
+        onConflict: 'id',
+        ignoreDuplicates: true,
+      });
+      if (error) errors.push(`${label}: ${error.message}`);
+      else imported += Math.min(100, rows.length - i);
+    }
+    counts[label] = imported;
+  };
+
+  const alumnos = stores.alumnos.map((a: any) => ({
+    ...sanitizeAlumnoForSupabase(a, 'prof-1'),
+    profesor_id: a.profesor_id || 'prof-1',
+    organizacion_id: a.organizacion_id || 'org-1',
+  }));
+  await upsertInBatches('alumnos', alumnos, 'alumnos');
+
+  const grupos = Array.isArray(stores.grupos) ? stores.grupos : [];
+  if (grupos.length) {
+    await upsertInBatches('grupos', grupos.map((g: any) => ({
+      ...g,
+      profesor_id: g.profesor_id || 'prof-1',
+      organizacion_id: g.organizacion_id || 'org-1',
+    })), 'grupos');
+  }
+
+  const rutinas = stores.rutinas as Rutina[];
+  await upsertInBatches('rutinas', rutinas.map((r) => sanitizeRutinaForSupabase(r)), 'rutinas');
+  const blocks = rutinas.flatMap((r) => (r.bloques || []).map((b) => ({
+    id: String(b.id), rutina_id: String(r.id),
+    nombre_sub_pestana: b.nombre_sub_pestana || 'Día',
+    orden: Number(b.orden) || 1,
+  })));
+  if (blocks.length) await upsertInBatches('bloques_rutina', blocks, 'bloques');
+
+  const exercises = rutinas.flatMap((r) => (r.bloques || []).flatMap((b) => (b.ejercicios || []).map((e) => {
+    const isSep = Boolean(e.es_separador);
+    return {
+      id: String(e.id), bloque_id: String(b.id), orden: Number(e.orden) || 1,
+      ejercicio: isSep ? (e.subtitulo_bloque || 'SEPARADOR') : (e.ejercicio || 'Ejercicio'),
+      series: e.series || '', repeticiones: e.repeticiones || '', carga: e.carga || '',
+      carga_p2: e.carga_p2 || '', pausa: e.pausa || '', rpe_objetivo: e.rpe_objetivo || '',
+      tipo_cadena: e.tipo_cadena || null, observaciones_dosificacion: e.observaciones_dosificacion || '',
+      video_url: e.video_url || '',
+    };
+  })));
+  if (exercises.length) await upsertInBatches('ejercicios_rutina', exercises, 'ejercicios');
+
+  const evaluations = Array.isArray(stores.evaluaciones_clinicas) ? stores.evaluaciones_clinicas : [];
+  if (evaluations.length) await upsertInBatches('evaluaciones_clinicas', evaluations, 'evaluaciones');
+  const tracking = Array.isArray(stores.seguimiento_diario) ? stores.seguimiento_diario : [];
+  if (tracking.length) await upsertInBatches('seguimiento_diario', tracking, 'seguimientos');
+
+  return { counts, errors };
+}
+
 export async function checkIfUserIsActive(identifier: string): Promise<boolean> {
   // Si no se puede verificar el estado, se deniega el acceso. No se debe
   // permitir que una sesión local eluda una desactivación o eliminación.
