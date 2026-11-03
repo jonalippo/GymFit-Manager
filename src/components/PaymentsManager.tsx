@@ -3,7 +3,6 @@ import { Alumno, Grupo, PagoCuota } from '../types';
 import { PaymentModal } from './PaymentModal';
 import {
   DollarSign,
-  Calendar,
   CreditCard,
   UserCheck,
   UserX,
@@ -13,14 +12,7 @@ import {
   BarChart3,
   Users,
   Layers,
-  Clock,
   CheckCircle2,
-  AlertCircle,
-  FileText,
-  ChevronRight,
-  Trash2,
-  Filter,
-  ArrowUpRight
 } from 'lucide-react';
 
 interface PaymentsManagerProps {

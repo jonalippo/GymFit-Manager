@@ -1,5 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Alumno, Grupo, Rutina, EvaluacionClinica, SeguimientoDiario, BloqueRutina, EjercicioRutina, PagoCuota } from '../types';
+import { Alumno, Grupo, Rutina, EjercicioRutina, PagoCuota, Profesor } from '../types';
 
 // ============================================================================
 // CREDENTIAL HELPERS & VALIDATION
@@ -78,7 +78,7 @@ export const supabase: SupabaseClient | null = (() => {
 })();
 
 // ============================================================================
-// DATA SANITIZATION (PREVENTS POSTGRESQL "invalid input syntax for type date: ''")
+// DATA SANITIZATION
 // ============================================================================
 
 function sanitizeDate(d?: string | null): string | null {
@@ -97,11 +97,11 @@ function sanitizeStr(s?: string | null): string | null {
   return trimmed === '' ? null : trimmed;
 }
 
-export function sanitizeAlumnoForSupabase(alumno: Alumno) {
+export function sanitizeAlumnoForSupabase(alumno: Alumno, defaultProfesorId?: string) {
   return {
     id: String(alumno.id),
     organizacion_id: sanitizeStr(alumno.organizacion_id) || 'org-1',
-    profesor_id: sanitizeStr(alumno.profesor_id) || 'prof-1',
+    profesor_id: sanitizeStr(alumno.profesor_id) || defaultProfesorId || 'prof-1',
     grupo_id: sanitizeStr(alumno.grupo_id),
     nombre: sanitizeStr(alumno.nombre) || 'Sin Nombre',
     apellido: sanitizeStr(alumno.apellido) || 'Sin Apellido',
@@ -157,7 +157,6 @@ export function sanitizeRutinaForSupabase(rutina: Rutina) {
   };
 }
 
-// Normalizador de ejercicios para asegurar que separadores y campos se reconstruyan exactamente
 function normalizeEjercicioFromDb(ej: any): EjercicioRutina {
   const isSep = Boolean(
     ej.es_separador ||
@@ -195,37 +194,56 @@ function normalizeEjercicioFromDb(ej: any): EjercicioRutina {
 }
 
 // ============================================================================
-// SUPABASE CRUD METHODS
+// SUPABASE CRUD METHODS (Con soporte multi-profesor / multi-gimnasio)
 // ============================================================================
 
-export async function fetchStudentsFromSupabase(): Promise<Alumno[] | null> {
+export const isOwnerProfesorId = (id?: string | null): boolean => {
+  if (!id) return false;
+  const clean = id.trim().toLowerCase();
+  return (
+    clean === 'prof-1' ||
+    clean === 'jonalippo@gmail.com'
+  );
+};
+
+export async function fetchStudentsFromSupabase(profesorId?: string): Promise<Alumno[] | null> {
   if (!supabase) return null;
+  if (!profesorId) return [];
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('alumnos')
       .select('*')
       .order('nombre', { ascending: true });
 
+    if (isOwnerProfesorId(profesorId)) {
+      query = query.or('profesor_id.eq.prof-1,profesor_id.eq.prof_jonalippo_gmail_com,profesor_id.is.null');
+    } else {
+      query = query.eq('profesor_id', profesorId);
+    }
+
+    const { data, error } = await query;
+
     if (error) {
       console.warn('[Supabase] Error fetching alumnos:', error.message);
-      return null;
+      return [];
     }
-    return data as Alumno[];
+    return (data || []) as Alumno[];
   } catch (err) {
     console.warn('[Supabase] Connection error fetching alumnos:', err);
-    return null;
+    return [];
   }
 }
 
 export async function saveStudentToSupabase(
-  alumno: Alumno
+  alumno: Alumno,
+  defaultProfesorId?: string
 ): Promise<{ success: boolean; error?: string }> {
   if (!supabase) {
     console.warn('[Supabase] Guardado en la nube abortado: el cliente de Supabase no está conectado.');
     return { success: false, error: 'Supabase no está configurado.' };
   }
   try {
-    const sanitized = sanitizeAlumnoForSupabase(alumno);
+    const sanitized = sanitizeAlumnoForSupabase(alumno, defaultProfesorId);
 
     if (sanitized.grupo_id) {
       try {
@@ -233,7 +251,7 @@ export async function saveStudentToSupabase(
           {
             id: sanitized.grupo_id,
             organizacion_id: sanitized.organizacion_id || 'org-1',
-            profesor_id: sanitized.profesor_id || 'prof-1',
+            profesor_id: sanitized.profesor_id || defaultProfesorId || 'prof-1',
             nombre_grupo: 'Turno General',
             horario: 'General'
           },
@@ -303,33 +321,42 @@ export async function clearAllStudentsFromSupabase(): Promise<boolean> {
   }
 }
 
-export async function fetchGroupsFromSupabase(): Promise<Grupo[] | null> {
+export async function fetchGroupsFromSupabase(profesorId?: string): Promise<Grupo[] | null> {
   if (!supabase) return null;
+  if (!profesorId) return [];
   try {
-    const { data, error } = await supabase
+    let query = supabase
       .from('grupos')
       .select('*')
       .order('nombre_grupo', { ascending: true });
 
+    if (isOwnerProfesorId(profesorId)) {
+      query = query.or('profesor_id.eq.prof-1,profesor_id.eq.prof_jonalippo_gmail_com,profesor_id.is.null');
+    } else {
+      query = query.eq('profesor_id', profesorId);
+    }
+
+    const { data, error } = await query;
+
     if (error) {
       console.warn('[Supabase] Error fetching grupos:', error.message);
-      return null;
+      return [];
     }
-    return data as Grupo[];
+    return (data || []) as Grupo[];
   } catch (err) {
     console.warn('[Supabase] Connection error fetching grupos:', err);
-    return null;
+    return [];
   }
 }
 
-export async function saveGroupToSupabase(grupo: Grupo): Promise<boolean> {
+export async function saveGroupToSupabase(grupo: Grupo, defaultProfesorId?: string): Promise<boolean> {
   if (!supabase) return false;
   try {
     const { error } = await supabase
       .from('grupos')
       .upsert({
         id: String(grupo.id),
-        profesor_id: sanitizeStr(grupo.profesor_id) || 'prof-1',
+        profesor_id: sanitizeStr(grupo.profesor_id) || defaultProfesorId || 'prof-1',
         organizacion_id: sanitizeStr(grupo.organizacion_id) || 'org-1',
         nombre_grupo: sanitizeStr(grupo.nombre_grupo) || 'Grupo',
         horario: sanitizeStr(grupo.horario) || 'General',
@@ -369,7 +396,6 @@ export async function deleteGroupFromSupabase(grupoId: string): Promise<boolean>
 export async function fetchRoutinesFromSupabase(alumnoId: string): Promise<Rutina[] | null> {
   if (!supabase) return null;
   try {
-    // 1. Obtener rutinas del alumno
     const { data: ruts, error: rError } = await supabase
       .from('rutinas')
       .select('*')
@@ -385,7 +411,6 @@ export async function fetchRoutinesFromSupabase(alumnoId: string): Promise<Rutin
 
     const rutIds = ruts.map((r) => String(r.id));
 
-    // 2. Obtener bloques de esas rutinas
     const { data: blks, error: bError } = await supabase
       .from('bloques_rutina')
       .select('*')
@@ -399,7 +424,6 @@ export async function fetchRoutinesFromSupabase(alumnoId: string): Promise<Rutin
     const validBlks = blks || [];
     const blkIds = validBlks.map((b) => String(b.id));
 
-    // 3. Obtener ejercicios de esos bloques
     let ejs: any[] = [];
     if (blkIds.length > 0) {
       const { data: fetchedEjs, error: eError } = await supabase
@@ -415,7 +439,6 @@ export async function fetchRoutinesFromSupabase(alumnoId: string): Promise<Rutin
       }
     }
 
-    // 4. Mapear y reconstruir estructura jerárquica
     const ejsByBlock: Record<string, EjercicioRutina[]> = {};
     ejs.forEach((e) => {
       const bKey = String(e.bloque_id);
@@ -458,7 +481,6 @@ export async function saveRoutineToSupabase(
     return { success: false, error: 'Supabase no está configurado.' };
   }
   try {
-    // 1. Guardar cabecera de la Rutina respetando el updated_at exacto local
     const sanitizedRutina = sanitizeRutinaForSupabase(rutina);
     const { error: rutError } = await supabase
       .from('rutinas')
@@ -466,11 +488,9 @@ export async function saveRoutineToSupabase(
 
     if (rutError) throw rutError;
 
-    // 2. Sincronizar y limpiar Bloques & Ejercicios
     if (rutina.bloques && Array.isArray(rutina.bloques)) {
       const activeBlockIds = rutina.bloques.map((b) => String(b.id));
 
-      // 2a. Guardar cada bloque y sus ejercicios
       for (let bIdx = 0; bIdx < rutina.bloques.length; bIdx++) {
         const bloque = rutina.bloques[bIdx];
         const blockOrder = Number(bloque.orden) || (bIdx + 1);
@@ -489,7 +509,6 @@ export async function saveRoutineToSupabase(
         const currentEjercicios = Array.isArray(bloque.ejercicios) ? bloque.ejercicios : [];
         const activeEjIds = currentEjercicios.map((e) => String(e.id));
 
-        // Upsert de los ejercicios actuales garantizando no violar restricciones NOT NULL de Postgres
         for (let eIdx = 0; eIdx < currentEjercicios.length; eIdx++) {
           const ej = currentEjercicios[eIdx];
           const calculatedOrder = Number(ej.orden) || (eIdx + 1);
@@ -507,7 +526,6 @@ export async function saveRoutineToSupabase(
             ejercicioStr = (ej.ejercicio || '').trim() || 'Ejercicio';
           }
 
-          // Postgres tiene restricciones NOT NULL en ejercicio, series, repeticiones y pausa
           const { error: ejError } = await supabase
             .from('ejercicios_rutina')
             .upsert({
@@ -529,7 +547,6 @@ export async function saveRoutineToSupabase(
           if (ejError) throw ejError;
         }
 
-        // Limpiar ejercicios huérfanos/eliminados en Supabase para este bloque
         if (activeEjIds.length > 0) {
           const { data: existingEjs } = await supabase
             .from('ejercicios_rutina')
@@ -548,7 +565,6 @@ export async function saveRoutineToSupabase(
         }
       }
 
-      // 2b. Eliminar de Supabase los bloques huérfanos eliminados por el usuario
       if (activeBlockIds.length > 0) {
         const { data: existingBlocks } = await supabase
           .from('bloques_rutina')
@@ -669,6 +685,90 @@ export async function deletePagoFromSupabase(id: string): Promise<boolean> {
     return true;
   } catch (err) {
     console.warn('[Supabase] Connection error deleting pago:', err);
+    return false;
+  }
+}
+
+// ============================================================================
+// GESTIÓN DE PROFESORES Y USUARIOS (Exclusivo Administrador)
+// ============================================================================
+
+export async function fetchUsersForAdmin(): Promise<Profesor[]> {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase
+      .from('profesores')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('[Supabase] Error fetching profesores:', error.message);
+      return [];
+    }
+    return (data || []) as Profesor[];
+  } catch (err) {
+    console.warn('[Supabase] Connection error fetching profesores:', err);
+    return [];
+  }
+}
+
+export async function toggleUserStatusInSupabase(profesorId: string, activo: boolean): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    const { error } = await supabase
+      .from('profesores')
+      .update({ activo, updated_at: new Date().toISOString() })
+      .eq('id', profesorId);
+
+    if (error) {
+      console.warn('[Supabase] Error toggling status:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Supabase] Exception toggling status:', err);
+    return false;
+  }
+}
+
+export async function deleteUserPermanentlyFromSupabase(profesorId: string): Promise<boolean> {
+  if (!supabase) return false;
+  try {
+    const { error } = await supabase.functions.invoke('admin-delete-user', {
+      body: { profesorId },
+    });
+
+    if (error) {
+      console.warn('[Supabase] Error deleting user:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('[Supabase] Exception deleting profesor:', err);
+    return false;
+  }
+}
+
+export async function checkIfUserIsActive(identifier: string): Promise<boolean> {
+  // Si no se puede verificar el estado, se deniega el acceso. No se debe
+  // permitir que una sesión local eluda una desactivación o eliminación.
+  if (!supabase || !identifier) return false;
+  try {
+    const clean = identifier.toLowerCase().trim();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(clean);
+    const query = supabase.from('profesores').select('activo').limit(1);
+    const { data, error } = isUuid
+      ? await query.or(`auth_user_id.eq.${clean},email.eq.${clean}`)
+      : await query.eq('email', clean);
+
+    if (error) {
+      console.warn('[Supabase] No se pudo validar el estado de la cuenta:', error.message);
+      return false;
+    }
+
+    return Boolean(data && data.length > 0 && data[0].activo === true);
+  } catch (err) {
+    console.warn('[Supabase] Error validando el estado de la cuenta:', err);
     return false;
   }
 }

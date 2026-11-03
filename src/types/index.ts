@@ -10,17 +10,21 @@ export interface Organizacion {
 
 export interface Profesor {
   id: string;
-  auth_user_id: string;
-  organizacion_id: string;
+  auth_user_id?: string;
+  organizacion_id?: string;
   rol: RolProfesor;
   nombre: string;
   email: string;
+  telefono?: string;
+  gym_name?: string;
+  activo?: boolean;
+  created_at?: string;
 }
 
 export interface Grupo {
   id: string;
-  profesor_id: string;
-  organizacion_id: string;
+  profesor_id?: string;
+  organizacion_id?: string;
   nombre_grupo: string;
   horario: string;
   descripcion?: string;
@@ -101,8 +105,8 @@ export interface EvaluacionClinica {
 
 export interface Alumno {
   id: string;
-  profesor_id: string;
-  organizacion_id: string;
+  profesor_id?: string;
+  organizacion_id?: string;
   grupo_id: string;
   nombre: string;
   apellido: string;
@@ -230,3 +234,4 @@ export interface PagoCuota {
   notas?: string;
   created_at: string;
 }
+
