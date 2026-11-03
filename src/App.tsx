@@ -574,10 +574,20 @@ export default function App() {
     }
 
     try {
-      const [ruts, evalClinica] = await Promise.all([
+      const [localRuts, evalClinica] = await Promise.all([
         cachedRuts ? Promise.resolve(cachedRuts) : getRutinasByAlumno(alumno.id),
         getEvaluacionClinica(alumno.id)
       ]);
+      let ruts = localRuts;
+      if (isSupabaseConfigured()) {
+        const cloudRuts = await fetchRoutinesFromSupabase(alumno.id);
+        if (cloudRuts && cloudRuts.length > 0) {
+          const merged = new Map(localRuts.map((routine) => [routine.id, routine]));
+          cloudRuts.forEach((routine) => merged.set(routine.id, routine));
+          ruts = Array.from(merged.values()).sort((a, b) => (a.orden || 0) - (b.orden || 0));
+          await Promise.all(ruts.map((routine) => saveRutina(routine)));
+        }
+      }
       setSelectedStudentId(alumno.id);
       setActiveView(view);
       setCurrentRutinas(ruts);
@@ -668,6 +678,19 @@ export default function App() {
       updated_at: new Date().toISOString()
     };
     await saveRutina(newRoutine);
+    setRoutinesByStudent((prev) => ({
+      ...prev,
+      [alumnoId]: [...(prev[alumnoId] || studentRoutines), newRoutine],
+    }));
+    setCurrentRutinas((prev) => [...prev.filter((routine) => routine.id !== newRoutine.id), newRoutine]);
+    if (isSupabaseConfigured()) {
+      const result = await saveRoutineToSupabase(newRoutine);
+      if (!result.success) {
+        showToast('error', `La rutina quedó guardada en este dispositivo, pero no en Supabase: ${result.error || 'error de sincronización'}`);
+      } else {
+        showToast('success', 'Nueva rutina guardada y sincronizada');
+      }
+    }
     return newRoutine;
   };
 

@@ -786,12 +786,12 @@ export async function importLocalBackupToSupabase(backup: any): Promise<{ counts
   const ownerProfessorId = String(ownerProfile.id);
   const ownerOrganizationId = String(ownerProfile.organizacion_id);
 
-  const upsertInBatches = async (table: string, rows: any[], label = table) => {
+  const upsertInBatches = async (table: string, rows: any[], label = table, overwriteExisting = false) => {
     let imported = 0;
     for (let i = 0; i < rows.length; i += 100) {
       const { error } = await supabase!.from(table).upsert(rows.slice(i, i + 100), {
         onConflict: 'id',
-        ignoreDuplicates: true,
+        ignoreDuplicates: !overwriteExisting,
       });
       if (error) errors.push(`${label}: ${error.message}`);
       else imported += Math.min(100, rows.length - i);
@@ -834,14 +834,16 @@ export async function importLocalBackupToSupabase(backup: any): Promise<{ counts
     const isSep = Boolean(e.es_separador);
     return {
       id: String(e.id), bloque_id: String(b.id), orden: Number(e.orden) || 1,
-      ejercicio: isSep ? (e.subtitulo_bloque || 'SEPARADOR') : (e.ejercicio || 'Ejercicio'),
+      ejercicio: isSep
+        ? (e.subtitulo_bloque ? `â€” SEPARADOR: ${e.subtitulo_bloque} â€”` : 'â€” SEPARADOR DE BLOQUE â€”')
+        : (e.ejercicio || 'Ejercicio'),
       series: e.series || '', repeticiones: e.repeticiones || '', carga: e.carga || '',
       pausa: e.pausa || '', rpe_objetivo: e.rpe_objetivo || '',
       tipo_cadena: e.tipo_cadena || null, observaciones_dosificacion: e.observaciones_dosificacion || '',
       video_url: e.video_url || '',
     };
   })));
-  if (exercises.length) await upsertInBatches('ejercicios_rutina', exercises, 'ejercicios');
+  if (exercises.length) await upsertInBatches('ejercicios_rutina', exercises, 'ejercicios', true);
 
   const evaluations = Array.isArray(stores.evaluaciones_clinicas) ? stores.evaluaciones_clinicas : [];
   if (evaluations.length) await upsertInBatches('evaluaciones_clinicas', evaluations, 'evaluaciones');
