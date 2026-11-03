@@ -759,6 +759,21 @@ export async function importLocalBackupToSupabase(backup: any): Promise<{ counts
     return { counts, errors: ['El archivo no tiene el formato esperado o no contiene alumnos y rutinas.'] };
   }
 
+  const { data: authData, error: authError } = await supabase.auth.getUser();
+  if (authError || !authData.user?.email) {
+    return { counts, errors: ['No se pudo identificar la sesión del administrador. Volvé a iniciar sesión e intentá de nuevo.'] };
+  }
+  const { data: ownerProfile, error: profileError } = await supabase
+    .from('profesores')
+    .select('id, organizacion_id')
+    .eq('email', authData.user.email)
+    .maybeSingle();
+  if (profileError || !ownerProfile?.id || !ownerProfile?.organizacion_id) {
+    return { counts, errors: ['No se encontró el perfil de profesor/organización del administrador en Supabase. No se importó ningún dato.'] };
+  }
+  const ownerProfessorId = String(ownerProfile.id);
+  const ownerOrganizationId = String(ownerProfile.organizacion_id);
+
   const upsertInBatches = async (table: string, rows: any[], label = table) => {
     let imported = 0;
     for (let i = 0; i < rows.length; i += 100) {
@@ -772,24 +787,30 @@ export async function importLocalBackupToSupabase(backup: any): Promise<{ counts
     counts[label] = imported;
   };
 
-  const alumnos = stores.alumnos.map((a: any) => ({
-    ...sanitizeAlumnoForSupabase(a, 'prof-1'),
-    profesor_id: a.profesor_id || 'prof-1',
-    organizacion_id: a.organizacion_id || 'org-1',
-  }));
-  await upsertInBatches('alumnos', alumnos, 'alumnos');
-
   const grupos = Array.isArray(stores.grupos) ? stores.grupos : [];
   if (grupos.length) {
     await upsertInBatches('grupos', grupos.map((g: any) => ({
       ...g,
-      profesor_id: g.profesor_id || 'prof-1',
-      organizacion_id: g.organizacion_id || 'org-1',
+      profesor_id: ownerProfessorId,
+      organizacion_id: ownerOrganizationId,
+      created_at: g.created_at || new Date().toISOString(),
+      updated_at: g.updated_at || new Date().toISOString(),
     })), 'grupos');
   }
 
+  const alumnos = stores.alumnos.map((a: any) => ({
+    ...sanitizeAlumnoForSupabase(a, ownerProfessorId),
+    profesor_id: ownerProfessorId,
+    organizacion_id: ownerOrganizationId,
+    grupo_id: a.grupo_id || null,
+  }));
+  await upsertInBatches('alumnos', alumnos, 'alumnos');
+
   const rutinas = stores.rutinas as Rutina[];
-  await upsertInBatches('rutinas', rutinas.map((r) => sanitizeRutinaForSupabase(r)), 'rutinas');
+  await upsertInBatches('rutinas', rutinas.map((r) => ({
+    ...sanitizeRutinaForSupabase(r),
+    created_at: r.created_at || new Date().toISOString(),
+  })), 'rutinas');
   const blocks = rutinas.flatMap((r) => (r.bloques || []).map((b) => ({
     id: String(b.id), rutina_id: String(r.id),
     nombre_sub_pestana: b.nombre_sub_pestana || 'Día',
@@ -803,9 +824,9 @@ export async function importLocalBackupToSupabase(backup: any): Promise<{ counts
       id: String(e.id), bloque_id: String(b.id), orden: Number(e.orden) || 1,
       ejercicio: isSep ? (e.subtitulo_bloque || 'SEPARADOR') : (e.ejercicio || 'Ejercicio'),
       series: e.series || '', repeticiones: e.repeticiones || '', carga: e.carga || '',
-      carga_p2: e.carga_p2 || '', pausa: e.pausa || '', rpe_objetivo: e.rpe_objetivo || '',
+      pausa: e.pausa || '', rpe_objetivo: e.rpe_objetivo || '',
       tipo_cadena: e.tipo_cadena || null, observaciones_dosificacion: e.observaciones_dosificacion || '',
-      video_url: e.video_url || '',
+      video_url: e.video_url || '', created_at: new Date().toISOString(),
     };
   })));
   if (exercises.length) await upsertInBatches('ejercicios_rutina', exercises, 'ejercicios');
