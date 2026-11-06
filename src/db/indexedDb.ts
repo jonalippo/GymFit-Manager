@@ -12,6 +12,7 @@ import {
 
 const DB_NAME = 'FitProManagerDB';
 const DB_VERSION = 5;
+const allowLocalSensitiveBackups = import.meta.env.DEV;
 
 export const STORES = {
   ORGANIZACIONES: 'organizaciones',
@@ -26,6 +27,30 @@ export const STORES = {
 } as const;
 
 let dbPromise: Promise<IDBDatabase> | null = null;
+
+export interface SyncIdentity {
+  userId: string;
+  profesorId: string;
+}
+
+let syncIdentity: SyncIdentity | null = null;
+
+/** Set only after Supabase has authenticated the session. */
+export function setSyncIdentity(identity: SyncIdentity | null) {
+  syncIdentity = identity;
+}
+
+export function getSyncIdentity(): SyncIdentity | null {
+  return syncIdentity;
+}
+
+function queuePayload(mutation: Record<string, unknown>) {
+  return {
+    ...mutation,
+    owner_user_id: syncIdentity?.userId || null,
+    owner_profesor_id: syncIdentity?.profesorId || null,
+  };
+}
 
 export function openDB(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
@@ -197,6 +222,36 @@ export async function clearAllLocalAlumnos(): Promise<void> {
   });
 }
 
+/**
+ * Removes the device cache only after the caller verified that every mutation
+ * reached Supabase. It deliberately leaves sync_queue untouched so no pending
+ * clinical or billing data can be lost.
+ */
+export async function purgeSensitiveLocalCache(): Promise<void> {
+  const db = await openDB();
+  const stores = ['alumnos', 'evaluaciones_clinicas', 'rutinas', 'seguimiento_diario', 'pagos', 'grupos'];
+  const tx = db.transaction(stores, 'readwrite');
+  stores.forEach((store) => tx.objectStore(store).clear());
+  try {
+    Object.keys(localStorage).forEach((key) => {
+      if (
+        key.startsWith('fitpro_routine_backup_') ||
+        key.startsWith('fitpro_student_routines_') ||
+        key === 'fitpro_local_pagos'
+      ) {
+        localStorage.removeItem(key);
+      }
+    });
+  } catch {}
+  return new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => {
+      notifyDBChanged();
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 type DBListener = () => void;
 const listeners: Set<DBListener> = new Set();
 
@@ -233,13 +288,13 @@ export async function saveAlumno(alumno: Alumno): Promise<void> {
   const tx = db.transaction(['alumnos', 'sync_queue'], 'readwrite');
   alumno.updated_at = new Date().toISOString();
   tx.objectStore('alumnos').put(alumno);
-  tx.objectStore('sync_queue').add({
+  tx.objectStore('sync_queue').add(queuePayload({
     table: 'alumnos',
     action: 'upsert',
     record_id: alumno.id,
     timestamp: new Date().toISOString(),
     payload: alumno
-  });
+  }));
 
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => {
@@ -263,8 +318,15 @@ export async function getGrupos(): Promise<Grupo[]> {
 
 export async function saveGrupo(grupo: Grupo): Promise<void> {
   const db = await openDB();
-  const tx = db.transaction('grupos', 'readwrite');
+  const tx = db.transaction(['grupos', 'sync_queue'], 'readwrite');
   tx.objectStore('grupos').put(grupo);
+  tx.objectStore('sync_queue').add(queuePayload({
+    table: 'grupos',
+    action: 'upsert',
+    record_id: grupo.id,
+    timestamp: new Date().toISOString(),
+    payload: grupo
+  }));
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => {
       notifyDBChanged();
@@ -276,8 +338,14 @@ export async function saveGrupo(grupo: Grupo): Promise<void> {
 
 export async function deleteGrupo(grupoId: string): Promise<void> {
   const db = await openDB();
-  const tx = db.transaction(['grupos', 'alumnos'], 'readwrite');
+  const tx = db.transaction(['grupos', 'alumnos', 'sync_queue'], 'readwrite');
   tx.objectStore('grupos').delete(grupoId);
+  tx.objectStore('sync_queue').add(queuePayload({
+    table: 'grupos',
+    action: 'delete',
+    record_id: grupoId,
+    timestamp: new Date().toISOString()
+  }));
 
   const alumnosStore = tx.objectStore('alumnos');
   const index = alumnosStore.index('grupo_id');
@@ -449,25 +517,27 @@ export async function saveRutina(rutina: Rutina): Promise<void> {
   });
 
   tx.objectStore('rutinas').put(normalizedRutina);
-  tx.objectStore('sync_queue').add({
+  tx.objectStore('sync_queue').add(queuePayload({
     table: 'rutinas',
     action: 'upsert',
     record_id: normalizedRutina.id,
     timestamp: new Date().toISOString(),
     payload: normalizedRutina
-  });
+  }));
 
   // Guardar inmediatamente en respaldo de localStorage
   try {
-    const currentBackup = getRoutinesFromLocalStorageBackup(rutina.alumno_id);
-    const existingIdx = currentBackup.findIndex((r) => r.id === normalizedRutina.id);
-    let updatedBackup: Rutina[];
-    if (existingIdx >= 0) {
-      updatedBackup = currentBackup.map((r) => (r.id === normalizedRutina.id ? normalizedRutina : r));
-    } else {
-      updatedBackup = [...currentBackup, normalizedRutina];
+    if (allowLocalSensitiveBackups) {
+      const currentBackup = getRoutinesFromLocalStorageBackup(rutina.alumno_id);
+      const existingIdx = currentBackup.findIndex((r) => r.id === normalizedRutina.id);
+      let updatedBackup: Rutina[];
+      if (existingIdx >= 0) {
+        updatedBackup = currentBackup.map((r) => (r.id === normalizedRutina.id ? normalizedRutina : r));
+      } else {
+        updatedBackup = [...currentBackup, normalizedRutina];
+      }
+      backupRoutinesToLocalStorage(rutina.alumno_id, updatedBackup);
     }
-    backupRoutinesToLocalStorage(rutina.alumno_id, updatedBackup);
   } catch {}
 
   return new Promise((resolve, reject) => {
@@ -519,13 +589,13 @@ export async function saveEvaluacionClinica(evaluacion: EvaluacionClinica): Prom
     }
   };
 
-  tx.objectStore('sync_queue').add({
+  tx.objectStore('sync_queue').add(queuePayload({
     table: 'evaluaciones_clinicas',
     action: 'upsert',
     record_id: evaluacion.id,
     timestamp: new Date().toISOString(),
     payload: evaluacion
-  });
+  }));
 
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => {
@@ -567,13 +637,13 @@ export async function saveSeguimientoDiario(seg: SeguimientoDiario): Promise<voi
     }
   };
 
-  tx.objectStore('sync_queue').add({
+  tx.objectStore('sync_queue').add(queuePayload({
     table: 'seguimiento_diario',
     action: 'insert',
     record_id: seg.id,
     timestamp: new Date().toISOString(),
     payload: seg
-  });
+  }));
 
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => {
@@ -610,12 +680,12 @@ export async function deleteAlumno(id: string): Promise<void> {
     (segReq.result || []).forEach((s: SeguimientoDiario) => segStore.delete(s.id));
   };
 
-  tx.objectStore('sync_queue').add({
+  tx.objectStore('sync_queue').add(queuePayload({
     table: 'alumnos',
     action: 'delete',
     record_id: id,
     timestamp: new Date().toISOString()
-  });
+  }));
 
   try {
     localStorage.removeItem(`fitpro_student_routines_${id}`);
@@ -636,12 +706,12 @@ export async function deleteRutina(id: string): Promise<void> {
   const db = await openDB();
   const tx = db.transaction(['rutinas', 'sync_queue'], 'readwrite');
   tx.objectStore('rutinas').delete(id);
-  tx.objectStore('sync_queue').add({
+  tx.objectStore('sync_queue').add(queuePayload({
     table: 'rutinas',
     action: 'delete',
     record_id: id,
     timestamp: new Date().toISOString()
-  });
+  }));
 
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => {
@@ -689,12 +759,28 @@ export async function clearSyncQueue(): Promise<void> {
   });
 }
 
+/** Remove only mutations that have been acknowledged by the remote backend. */
+export async function removeSyncQueueItems(ids: number[]): Promise<void> {
+  if (ids.length === 0) return;
+  const db = await openDB();
+  const tx = db.transaction('sync_queue', 'readwrite');
+  const store = tx.objectStore('sync_queue');
+  ids.forEach((id) => store.delete(id));
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => {
+      notifyDBChanged();
+      resolve();
+    };
+    tx.onerror = () => reject(tx.error);
+  });
+}
+
 export async function getPagos(): Promise<PagoCuota[]> {
   try {
     const db = await openDB();
     return new Promise((resolve) => {
       if (!db.objectStoreNames.contains('pagos')) {
-        const local = localStorage.getItem('fitpro_local_pagos');
+        const local = allowLocalSensitiveBackups ? localStorage.getItem('fitpro_local_pagos') : null;
         resolve(local ? JSON.parse(local) : []);
         return;
       }
@@ -707,13 +793,13 @@ export async function getPagos(): Promise<PagoCuota[]> {
         resolve(list);
       };
       req.onerror = () => {
-        const local = localStorage.getItem('fitpro_local_pagos');
+        const local = allowLocalSensitiveBackups ? localStorage.getItem('fitpro_local_pagos') : null;
         resolve(local ? JSON.parse(local) : []);
       };
     });
   } catch (err) {
     console.warn('Error reading pagos:', err);
-    const local = localStorage.getItem('fitpro_local_pagos');
+    const local = allowLocalSensitiveBackups ? localStorage.getItem('fitpro_local_pagos') : null;
     return local ? JSON.parse(local) : [];
   }
 }
@@ -721,12 +807,14 @@ export async function getPagos(): Promise<PagoCuota[]> {
 export async function savePago(pago: PagoCuota): Promise<void> {
   try {
     try {
-      const saved = localStorage.getItem('fitpro_local_pagos');
-      const list: PagoCuota[] = saved ? JSON.parse(saved) : [];
-      const idx = list.findIndex((p) => p.id === pago.id);
-      if (idx >= 0) list[idx] = pago;
-      else list.unshift(pago);
-      localStorage.setItem('fitpro_local_pagos', JSON.stringify(list));
+      if (allowLocalSensitiveBackups) {
+        const saved = localStorage.getItem('fitpro_local_pagos');
+        const list: PagoCuota[] = saved ? JSON.parse(saved) : [];
+        const idx = list.findIndex((p) => p.id === pago.id);
+        if (idx >= 0) list[idx] = pago;
+        else list.unshift(pago);
+        localStorage.setItem('fitpro_local_pagos', JSON.stringify(list));
+      }
     } catch {}
 
     const db = await openDB();
@@ -736,13 +824,13 @@ export async function savePago(pago: PagoCuota): Promise<void> {
     }
     const tx = db.transaction(['pagos', 'sync_queue'], 'readwrite');
     tx.objectStore('pagos').put(pago);
-    tx.objectStore('sync_queue').add({
+    tx.objectStore('sync_queue').add(queuePayload({
       table: 'pagos',
       action: 'upsert',
       record_id: pago.id,
       timestamp: new Date().toISOString(),
       payload: pago
-    });
+    }));
     return new Promise((resolve, reject) => {
       tx.oncomplete = () => {
         notifyDBChanged();
@@ -759,7 +847,7 @@ export async function savePago(pago: PagoCuota): Promise<void> {
 export async function deletePago(id: string): Promise<void> {
   try {
     try {
-      const saved = localStorage.getItem('fitpro_local_pagos');
+      const saved = allowLocalSensitiveBackups ? localStorage.getItem('fitpro_local_pagos') : null;
       if (saved) {
         const list: PagoCuota[] = JSON.parse(saved);
         localStorage.setItem('fitpro_local_pagos', JSON.stringify(list.filter((p) => p.id !== id)));
@@ -773,12 +861,12 @@ export async function deletePago(id: string): Promise<void> {
     }
     const tx = db.transaction(['pagos', 'sync_queue'], 'readwrite');
     tx.objectStore('pagos').delete(id);
-    tx.objectStore('sync_queue').add({
+    tx.objectStore('sync_queue').add(queuePayload({
       table: 'pagos',
       action: 'delete',
       record_id: id,
       timestamp: new Date().toISOString()
-    });
+    }));
     return new Promise((resolve, reject) => {
       tx.oncomplete = () => {
         notifyDBChanged();

@@ -12,7 +12,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- 2. TABLA: ORGANIZACIONES (GIMNASIOS / CENTROS DE RENDIMIENTO)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.organizaciones (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id VARCHAR(100) PRIMARY KEY,
     nombre VARCHAR(150) NOT NULL,
     plan_suscripcion VARCHAR(50) NOT NULL DEFAULT 'starter' CHECK (plan_suscripcion IN ('starter', 'pro', 'enterprise')),
     max_profesores INTEGER NOT NULL DEFAULT 3,
@@ -25,13 +25,15 @@ CREATE TABLE IF NOT EXISTS public.organizaciones (
 -- 3. TABLA: PROFESORES (VINCULADOS A AUTH.USERS DE SUPABASE)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.profesores (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    auth_user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
-    organizacion_id UUID NOT NULL REFERENCES public.organizaciones(id) ON DELETE CASCADE,
+    id VARCHAR(100) PRIMARY KEY,
+    auth_user_id VARCHAR(100) NOT NULL,
+    organizacion_id VARCHAR(100),
     rol VARCHAR(50) NOT NULL DEFAULT 'profesor' CHECK (rol IN ('admin_gimnasio', 'profesor')),
     nombre VARCHAR(100) NOT NULL,
     email VARCHAR(150) NOT NULL,
     telefono VARCHAR(50),
+    gym_name VARCHAR(150),
+    activo BOOLEAN NOT NULL DEFAULT true,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
     CONSTRAINT uq_profesores_auth UNIQUE (auth_user_id)
@@ -41,9 +43,9 @@ CREATE TABLE IF NOT EXISTS public.profesores (
 -- 4. TABLA: GRUPOS (TURNOS, NIVELES Y ACTIVIDADES)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.grupos (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organizacion_id UUID NOT NULL REFERENCES public.organizaciones(id) ON DELETE CASCADE,
-    profesor_id UUID NOT NULL REFERENCES public.profesores(id) ON DELETE RESTRICT,
+    id VARCHAR(100) PRIMARY KEY,
+    organizacion_id VARCHAR(100),
+    profesor_id VARCHAR(100),
     nombre_grupo VARCHAR(100) NOT NULL,
     horario VARCHAR(100) NOT NULL,
     descripcion TEXT,
@@ -55,10 +57,10 @@ CREATE TABLE IF NOT EXISTS public.grupos (
 -- 5. TABLA: ALUMNOS (PACIENTES / ATLETAS)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.alumnos (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    organizacion_id UUID NOT NULL REFERENCES public.organizaciones(id) ON DELETE CASCADE,
-    profesor_id UUID NOT NULL REFERENCES public.profesores(id) ON DELETE RESTRICT,
-    grupo_id UUID REFERENCES public.grupos(id) ON DELETE SET NULL,
+    id VARCHAR(100) PRIMARY KEY,
+    organizacion_id VARCHAR(100),
+    profesor_id VARCHAR(100),
+    grupo_id VARCHAR(100),
     nombre VARCHAR(100) NOT NULL,
     apellido VARCHAR(100) NOT NULL,
     dni VARCHAR(30),
@@ -90,6 +92,7 @@ CREATE TABLE IF NOT EXISTS public.alumnos (
     fecha_pago_cuota DATE,
     fecha_vencimiento_cuota DATE,
     cuota_al_dia BOOLEAN NOT NULL DEFAULT true,
+    ultimo_monto_pago NUMERIC(12,2) DEFAULT 0,
 
     -- Estado Biomecánico & Dolor
     alerta_lesion_activa TEXT,
@@ -104,8 +107,8 @@ CREATE TABLE IF NOT EXISTS public.alumnos (
 -- 6. TABLA: EVALUACIONES CLÍNICAS ("EL ICEBERG" - 5 PILARES BIOPSICOSOCIALES)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.evaluaciones_clinicas (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    alumno_id UUID NOT NULL REFERENCES public.alumnos(id) ON DELETE CASCADE,
+    id VARCHAR(100) PRIMARY KEY,
+    alumno_id VARCHAR(100) NOT NULL REFERENCES public.alumnos(id) ON DELETE CASCADE,
     fecha DATE NOT NULL DEFAULT CURRENT_DATE,
     
     -- Pilar 1: Presentación Actual
@@ -149,8 +152,8 @@ CREATE TABLE IF NOT EXISTS public.evaluaciones_clinicas (
 -- 7. TABLA: RUTINAS DE ENTRENAMIENTO (CICLOS)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.rutinas (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    alumno_id UUID NOT NULL REFERENCES public.alumnos(id) ON DELETE CASCADE,
+    id VARCHAR(100) PRIMARY KEY,
+    alumno_id VARCHAR(100) NOT NULL REFERENCES public.alumnos(id) ON DELETE CASCADE,
     nombre_rutina VARCHAR(150) NOT NULL,
     fecha_inicio DATE NOT NULL,
     fecha_cambio DATE NOT NULL, -- Alerta de vencimiento / reevaluación
@@ -165,8 +168,8 @@ CREATE TABLE IF NOT EXISTS public.rutinas (
 -- 8. TABLA: BLOQUES DE RUTINA (SUB-PESTAÑAS / DÍAS DE ENTRENAMIENTO)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.bloques_rutina (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    rutina_id UUID NOT NULL REFERENCES public.rutinas(id) ON DELETE CASCADE,
+    id VARCHAR(100) PRIMARY KEY,
+    rutina_id VARCHAR(100) NOT NULL REFERENCES public.rutinas(id) ON DELETE CASCADE,
     nombre_sub_pestana VARCHAR(100) NOT NULL, -- Ej: "Día 1: Metabólico + Empuje"
     orden INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
@@ -176,18 +179,21 @@ CREATE TABLE IF NOT EXISTS public.bloques_rutina (
 -- 9. TABLA: EJERCICIOS DE RUTINA (SPREADSHEET ROWS)
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.ejercicios_rutina (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    bloque_id UUID NOT NULL REFERENCES public.bloques_rutina(id) ON DELETE CASCADE,
+    id VARCHAR(100) PRIMARY KEY,
+    bloque_id VARCHAR(100) NOT NULL REFERENCES public.bloques_rutina(id) ON DELETE CASCADE,
     orden INTEGER NOT NULL DEFAULT 1,
     ejercicio VARCHAR(200) NOT NULL,
     series VARCHAR(50) NOT NULL,
     repeticiones VARCHAR(50) NOT NULL,
     carga VARCHAR(50),
+    carga_p2 VARCHAR(50),
     pausa VARCHAR(50) NOT NULL,
     rpe_objetivo VARCHAR(50),
     tipo_cadena VARCHAR(10) CHECK (tipo_cadena IN ('CCC', 'CCA', 'MIXTA')),
     observaciones_dosificacion TEXT NOT NULL,
     video_url TEXT,
+    es_separador BOOLEAN NOT NULL DEFAULT false,
+    subtitulo_bloque VARCHAR(200),
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
@@ -195,12 +201,30 @@ CREATE TABLE IF NOT EXISTS public.ejercicios_rutina (
 -- 10. TABLA: SEGUIMIENTO DIARIO / RPE EN SALA
 -- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.seguimiento_diario (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    alumno_id UUID NOT NULL REFERENCES public.alumnos(id) ON DELETE CASCADE,
+    id VARCHAR(100) PRIMARY KEY,
+    alumno_id VARCHAR(100) NOT NULL REFERENCES public.alumnos(id) ON DELETE CASCADE,
     fecha DATE NOT NULL DEFAULT CURRENT_DATE,
     rpe_fatiga NUMERIC(3,1) NOT NULL CHECK (rpe_fatiga >= 1 AND rpe_fatiga <= 10),
     nivel_dolor NUMERIC(3,1) NOT NULL CHECK (nivel_dolor >= 0 AND nivel_dolor <= 10),
     tolerancia_carga VARCHAR(30) NOT NULL CHECK (tolerancia_carga IN ('muy_buena', 'adecuada', 'fatiga_excesiva', 'sintomas_aumentados')),
+    notas TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
+);
+
+-- ============================================================================
+-- 11. PAGOS Y CUOTAS
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.pagos (
+    id VARCHAR(100) PRIMARY KEY,
+    alumno_id VARCHAR(100) NOT NULL REFERENCES public.alumnos(id) ON DELETE CASCADE,
+    alumno_nombre VARCHAR(220) NOT NULL,
+    grupo_id VARCHAR(100),
+    grupo_nombre VARCHAR(100),
+    monto NUMERIC(12,2) NOT NULL CHECK (monto >= 0),
+    fecha_pago DATE NOT NULL,
+    fecha_vencimiento DATE NOT NULL,
+    mes_correspondiente VARCHAR(20) NOT NULL,
+    metodo_pago VARCHAR(50),
     notas TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
@@ -220,6 +244,8 @@ CREATE INDEX IF NOT EXISTS idx_rutinas_alumno ON public.rutinas(alumno_id);
 CREATE INDEX IF NOT EXISTS idx_bloques_rutina ON public.bloques_rutina(rutina_id);
 CREATE INDEX IF NOT EXISTS idx_ejercicios_bloque ON public.ejercicios_rutina(bloque_id);
 CREATE INDEX IF NOT EXISTS idx_seguimiento_alumno ON public.seguimiento_diario(alumno_id);
+CREATE INDEX IF NOT EXISTS idx_pagos_alumno ON public.pagos(alumno_id);
+CREATE INDEX IF NOT EXISTS idx_pagos_fecha ON public.pagos(fecha_pago);
 
 -- ==============================================================================
 -- 12. TRIGGERS DE ACTUALIZACIÓN AUTOMÁTICA (UPDATED_AT)
@@ -248,6 +274,10 @@ DROP TRIGGER IF EXISTS trg_rutinas_updated ON public.rutinas;
 CREATE TRIGGER trg_rutinas_updated BEFORE UPDATE ON public.rutinas
 FOR EACH ROW EXECUTE FUNCTION public.set_current_timestamp_updated_at();
 
+DROP TRIGGER IF EXISTS trg_evaluaciones_clinicas_updated ON public.evaluaciones_clinicas;
+CREATE TRIGGER trg_evaluaciones_clinicas_updated BEFORE UPDATE ON public.evaluaciones_clinicas
+FOR EACH ROW EXECUTE FUNCTION public.set_current_timestamp_updated_at();
+
 -- ==============================================================================
 -- 13. SEGURIDAD Y PRIVACIDAD MULTI-TENANT: ROW LEVEL SECURITY (RLS)
 -- Cero filtración entre gimnasios y profesores. Aislamiento absoluto.
@@ -263,23 +293,30 @@ ALTER TABLE public.rutinas ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.bloques_rutina ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ejercicios_rutina ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.seguimiento_diario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pagos ENABLE ROW LEVEL SECURITY;
 
 -- Helper function: Obtener organización del usuario actual autenticado
 CREATE OR REPLACE FUNCTION public.current_user_org_id()
-RETURNS UUID AS $$
-  SELECT organizacion_id FROM public.profesores WHERE auth_user_id = auth.uid() LIMIT 1;
+RETURNS VARCHAR AS $$
+  SELECT organizacion_id FROM public.profesores WHERE auth_user_id = auth.uid()::text LIMIT 1;
 $$ LANGUAGE sql STABLE SECURITY DEFINER;
 
 -- POLÍTICAS: ORGANIZACIONES
 CREATE POLICY "Acceso a organización propia" ON public.organizaciones
 FOR ALL USING (id = public.current_user_org_id());
 
+CREATE POLICY "Usuarios autenticados crean su organización" ON public.organizaciones
+FOR INSERT WITH CHECK (auth.uid() IS NOT NULL);
+
 -- POLÍTICAS: PROFESORES
 CREATE POLICY "Profesores ven colegas de su misma organización" ON public.profesores
 FOR SELECT USING (organizacion_id = public.current_user_org_id());
 
 CREATE POLICY "Modificación de su propio perfil de profesor" ON public.profesores
-FOR UPDATE USING (auth_user_id = auth.uid());
+FOR UPDATE USING (auth_user_id = auth.uid()::text);
+
+CREATE POLICY "Usuarios crean su propio perfil de profesor" ON public.profesores
+FOR INSERT WITH CHECK (auth_user_id = auth.uid()::text);
 
 -- POLÍTICAS: GRUPOS
 CREATE POLICY "Acceso a grupos de la organización" ON public.grupos
@@ -338,6 +375,15 @@ FOR ALL USING (
     EXISTS (
         SELECT 1 FROM public.alumnos a
         WHERE a.id = seguimiento_diario.alumno_id
+        AND a.organizacion_id = public.current_user_org_id()
+    )
+);
+
+CREATE POLICY "Gestión de pagos de alumnos de la organización" ON public.pagos
+FOR ALL USING (
+    EXISTS (
+        SELECT 1 FROM public.alumnos a
+        WHERE a.id = pagos.alumno_id
         AND a.organizacion_id = public.current_user_org_id()
     )
 );

@@ -70,7 +70,7 @@ Deno.serve(async (request) => {
 
   const { data: professor, error: professorError } = await adminClient
     .from('profesores')
-    .select('id, auth_user_id')
+    .select('id, auth_user_id, organizacion_id')
     .eq('id', profesorId)
     .maybeSingle();
 
@@ -118,6 +118,28 @@ Deno.serve(async (request) => {
     .eq('id', profesorId);
   if (profileError) {
     return json({ error: profileError.message }, 500);
+  }
+
+  // Cada solicitud de membresía crea su propia organización. Sólo se elimina
+  // cuando ya no tiene otros perfiles, para no dejar datos huérfanos y permitir
+  // que el correo pueda volver a registrarse desde cero.
+  if (professor.organizacion_id) {
+    const { count, error: membersError } = await adminClient
+      .from('profesores')
+      .select('id', { count: 'exact', head: true })
+      .eq('organizacion_id', professor.organizacion_id);
+    if (membersError) {
+      return json({ error: membersError.message }, 500);
+    }
+    if ((count ?? 0) === 0) {
+      const { error: orgError } = await adminClient
+        .from('organizaciones')
+        .delete()
+        .eq('id', professor.organizacion_id);
+      if (orgError) {
+        return json({ error: orgError.message }, 500);
+      }
+    }
   }
 
   const { error: authDeleteError } = await adminClient.auth.admin.deleteUser(

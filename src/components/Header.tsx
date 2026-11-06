@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { PWAInstallButton } from './PWAInstallButton';
 import { GymFitLogo } from './GymFitLogo';
+import { OfflineBanner } from './OfflineBanner';
 import {
   Home,
   LogOut,
@@ -39,12 +40,6 @@ export const Header: React.FC<HeaderProps> = ({
         clean === 'jonalippo@gmail.com' ||
         clean === 'prof-1'
       ) {
-        return true;
-      }
-    }
-    if (name) {
-      const cleanName = name.toLowerCase().trim();
-      if (cleanName.includes('jonatan') || cleanName.includes('lippo')) {
         return true;
       }
     }
@@ -143,6 +138,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* ACCIONES DE ESCRITORIO */}
         <div className="hidden md:flex items-center gap-3 shrink-0">
+          <OfflineBanner />
           <PWAInstallButton />
 
           {/* Perfil del profesor logueado */}

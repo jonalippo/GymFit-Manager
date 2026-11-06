@@ -1,5 +1,14 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { Alumno, Grupo, Rutina, EjercicioRutina, PagoCuota, Profesor } from '../types';
+import {
+  Alumno,
+  Grupo,
+  Rutina,
+  EjercicioRutina,
+  PagoCuota,
+  Profesor,
+  EvaluacionClinica,
+  SeguimientoDiario,
+} from '../types';
 
 // ============================================================================
 // CREDENTIAL HELPERS & VALIDATION
@@ -607,6 +616,97 @@ export async function deleteRoutineFromSupabase(rutinaId: string): Promise<boole
   } catch (err) {
     console.warn('[Supabase] Connection error deleting rutina:', err);
     return false;
+  }
+}
+
+// ============================================================================
+// EVALUACIONES CLÍNICAS Y SEGUIMIENTO EN SALA
+// ============================================================================
+
+export async function fetchLatestEvaluacionFromSupabase(alumnoId: string): Promise<EvaluacionClinica | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('evaluaciones_clinicas')
+      .select('*')
+      .eq('alumno_id', alumnoId)
+      .order('fecha', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) {
+      console.warn('[Supabase] Error fetching evaluación:', error.message);
+      return null;
+    }
+    return (data as EvaluacionClinica | null) || null;
+  } catch (err) {
+    console.warn('[Supabase] Connection error fetching evaluación:', err);
+    return null;
+  }
+}
+
+export async function saveEvaluacionToSupabase(
+  evaluacion: EvaluacionClinica
+): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) return { success: false, error: 'Supabase no está configurado.' };
+  try {
+    const record = {
+      ...evaluacion,
+      id: String(evaluacion.id),
+      alumno_id: String(evaluacion.alumno_id),
+      fecha: sanitizeDate(evaluacion.fecha) || new Date().toISOString().slice(0, 10),
+      dolor_eva: Number(evaluacion.dolor_eva) || 0,
+      zonas_dolor: evaluacion.zonas_dolor || [],
+      patrones_movimiento: evaluacion.patrones_movimiento || [],
+      control_motor_cadena: evaluacion.control_motor_cadena || {},
+      alertas_biomecanicas_clave: evaluacion.alertas_biomecanicas_clave || [],
+      updated_at: new Date().toISOString(),
+    };
+    const { error } = await supabase.from('evaluaciones_clinicas').upsert(record, { onConflict: 'id' });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+export async function saveSeguimientoToSupabase(
+  seguimiento: SeguimientoDiario
+): Promise<{ success: boolean; error?: string }> {
+  if (!supabase) return { success: false, error: 'Supabase no está configurado.' };
+  try {
+    const record = {
+      ...seguimiento,
+      id: String(seguimiento.id),
+      alumno_id: String(seguimiento.alumno_id),
+      fecha: sanitizeDate(seguimiento.fecha) || new Date().toISOString().slice(0, 10),
+      rpe_fatiga: Number(seguimiento.rpe_fatiga) || 1,
+      nivel_dolor: Number(seguimiento.nivel_dolor) || 0,
+      notas: sanitizeStr(seguimiento.notas) || '',
+    };
+    const { error } = await supabase.from('seguimiento_diario').upsert(record, { onConflict: 'id' });
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+}
+
+export async function fetchSeguimientosFromSupabase(alumnoId: string): Promise<SeguimientoDiario[] | null> {
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase
+      .from('seguimiento_diario')
+      .select('*')
+      .eq('alumno_id', alumnoId)
+      .order('fecha', { ascending: false });
+    if (error) {
+      console.warn('[Supabase] Error fetching seguimientos:', error.message);
+      return null;
+    }
+    return (data || []) as SeguimientoDiario[];
+  } catch (err) {
+    console.warn('[Supabase] Connection error fetching seguimientos:', err);
+    return null;
   }
 }
 

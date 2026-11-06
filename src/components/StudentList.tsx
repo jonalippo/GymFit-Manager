@@ -48,7 +48,6 @@ interface StudentListProps {
   onEditStudent: (alumno: Alumno) => Promise<void>;
   onDeleteStudent: (alumnoId: string) => Promise<void>;
   onAddGrupo: (newGrupo: Omit<Grupo, 'id'>) => Promise<void>;
-  onClearAllStudents?: () => Promise<void>;
   onNavigateToGroups?: () => void;
 }
 
@@ -64,7 +63,6 @@ export const StudentList: React.FC<StudentListProps> = ({
   onEditStudent,
   onDeleteStudent,
   onAddGrupo,
-  onClearAllStudents,
   onNavigateToGroups,
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
@@ -480,20 +478,6 @@ export const StudentList: React.FC<StudentListProps> = ({
             <span>Nuevo Grupo</span>
           </button>
 
-          {onClearAllStudents && alumnos.length > 0 && (
-            <button
-              onClick={() => {
-                if (window.confirm('¿Deseas eliminar todos los alumnos de prueba para empezar de cero con tus alumnos reales?')) {
-                  onClearAllStudents();
-                }
-              }}
-              className="py-2.5 px-3 rounded-xl bg-rose-950/40 hover:bg-rose-900/60 text-rose-300 border border-rose-900/50 text-xs font-medium flex items-center justify-center gap-1 transition shrink-0"
-              title="Vaciar alumnos de prueba y empezar de cero"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-rose-400" />
-              <span className="hidden sm:inline">Vaciar Demo</span>
-            </button>
-          )}
         </div>
       </div>
 

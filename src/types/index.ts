@@ -47,7 +47,7 @@ export type ZonaDolor =
   | 'tobillo_izq'
   | 'tobillo_der';
 
-export type DecisionTerapeutica = 'ENTRENAR' | 'DERIVAR';
+export type DecisionTerapeutica = 'ENTRENAR' | 'ADAPTAR/COLABORAR' | 'DERIVAR';
 
 export type PatronMovimiento =
   | 'sentadilla'

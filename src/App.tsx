@@ -8,12 +8,17 @@ import {
   getEvaluacionClinica,
   saveAlumno,
   deleteAlumno,
-  clearAllLocalAlumnos,
   saveGrupo,
   deleteGrupo,
   saveRutina,
   deleteRutina,
   saveEvaluacionClinica,
+  getPagos,
+  savePago,
+  deletePago,
+  setSyncIdentity,
+  getPendingMutationsCount,
+  purgeSensitiveLocalCache,
 } from './db/indexedDb';
 
 import { Header } from './components/Header';
@@ -34,7 +39,6 @@ import {
   fetchRoutinesFromSupabase,
   saveStudentToSupabase,
   deleteStudentFromSupabase,
-  clearAllStudentsFromSupabase,
   fetchGroupsFromSupabase,
   saveGroupToSupabase,
   deleteGroupFromSupabase,
@@ -44,7 +48,12 @@ import {
   supabase,
   fetchUsersForAdmin,
   toggleUserStatusInSupabase,
-  deleteUserPermanentlyFromSupabase
+  deleteUserPermanentlyFromSupabase,
+  fetchPagosFromSupabase,
+  savePagoToSupabase,
+  deletePagoFromSupabase,
+  saveEvaluacionToSupabase,
+  fetchLatestEvaluacionFromSupabase,
 } from './db/supabaseClient';
 
 import {
@@ -84,7 +93,6 @@ export const getProfesorIdForUser = (user: AuthUser | null): string => {
   if (!user) return 'prof-1';
   const clean = user.email ? user.email.toLowerCase().trim() : '';
   if (isOwnerEmailAddress(clean)) return 'prof-1';
-  if (user.id && user.id !== 'prof-1') return user.id;
   if (clean) return `prof_${clean.replace(/[^a-zA-Z0-9]/g, '_')}`;
   return user.id || 'prof-anonimo';
 };
@@ -120,6 +128,7 @@ export default function App() {
       return null;
     }
   });
+  const isPlatformAdmin = isOwnerEmailAddress(currentUser?.email);
 
   const [alumnos, setAlumnos] = useState<Alumno[]>([]);
   const [grupos, setGrupos] = useState<Grupo[]>([]);
@@ -295,7 +304,11 @@ export default function App() {
       isOwnerProfesorId(profId);
 
     try {
-      await seedInitialDataIfEmpty();
+      // Los datos de demostración sólo pueden existir en desarrollo. Producción
+      // toma a Supabase como fuente de verdad y jamás siembra registros locales.
+      if (import.meta.env.DEV) {
+        await seedInitialDataIfEmpty();
+      }
       const rawAlumnos = await getAlumnos();
       const rawGrupos = await getGrupos();
 
@@ -416,6 +429,22 @@ export default function App() {
         }
       }
 
+      // Los pagos también tienen respaldo local. Al reconectar, se fusionan por id
+      // sin descartar registros creados mientras el dispositivo estuvo offline.
+      const localPagos = await getPagos();
+      let mergedPagos = localPagos;
+      if (isSupabaseConfigured()) {
+        const cloudPagos = await fetchPagosFromSupabase();
+        if (cloudPagos) {
+          const pagosById = new Map(localPagos.map((p) => [p.id, p]));
+          cloudPagos.forEach((p) => pagosById.set(p.id, p));
+          mergedPagos = Array.from(pagosById.values()).sort(
+            (a, b) => new Date(b.fecha_pago).getTime() - new Date(a.fecha_pago).getTime()
+          );
+        }
+      }
+      setPagos(mergedPagos);
+
       setAlumnos(userAlumnos);
       setGrupos(userGrupos);
 
@@ -497,6 +526,7 @@ export default function App() {
     isInitialLoadedRef.current = true;
     lastSyncedUserRef.current = null;
     setCurrentUser(user);
+    setSyncIdentity({ userId: user.id, profesorId: getProfesorIdForUser(user) });
     setActiveView('home');
     setActiveDockStudents([]);
     setSelectedStudentId(null);
@@ -514,9 +544,10 @@ export default function App() {
     showToast('success', `Bienvenido, ${user.name}`);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     lastSyncedUserRef.current = null;
     setCurrentUser(null);
+    setSyncIdentity(null);
     setActiveView('home');
     setAlumnos([]);
     setGrupos([]);
@@ -532,6 +563,15 @@ export default function App() {
     } catch {}
     if (supabase) {
       supabase.auth.signOut().catch(() => {});
+    }
+    if (import.meta.env.PROD && isSupabaseConfigured()) {
+      try {
+        if ((await getPendingMutationsCount()) === 0) {
+          await purgeSensitiveLocalCache();
+        }
+      } catch (error) {
+        console.warn('[Local cache] No se pudo purgar la caché sensible:', error);
+      }
     }
     showToast('info', 'Sesión cerrada');
   };
@@ -562,7 +602,16 @@ export default function App() {
     try {
       const [ruts, evalClinica] = await Promise.all([
         cachedRuts ? Promise.resolve(cachedRuts) : getRutinasByAlumno(alumno.id),
-        getEvaluacionClinica(alumno.id)
+        (async () => {
+          const local = await getEvaluacionClinica(alumno.id);
+          if (!isSupabaseConfigured()) return local;
+          const cloud = await fetchLatestEvaluacionFromSupabase(alumno.id);
+          if (cloud && (!local || new Date(cloud.fecha).getTime() > new Date(local.fecha).getTime())) {
+            await saveEvaluacionClinica(cloud);
+            return cloud;
+          }
+          return local;
+        })()
       ]);
       setSelectedStudentId(alumno.id);
       setActiveView(view);
@@ -680,7 +729,8 @@ export default function App() {
       await saveRutina(rutina);
 
       if (isSupabaseConfigured()) {
-        saveRoutineToSupabase(rutina).catch((err) => console.warn('[Supabase]', err));
+        const result = await saveRoutineToSupabase(rutina);
+        if (!result.success) console.warn('[Supabase] Rutina pendiente de sincronización:', result.error);
       }
     } finally {
       setTimeout(() => {
@@ -692,7 +742,8 @@ export default function App() {
   const handleDeleteRoutine = async (routineId: string) => {
     await deleteRutina(routineId);
     if (isSupabaseConfigured()) {
-      deleteRoutineFromSupabase(routineId).catch((err) => console.warn('[Supabase]', err));
+      const deleted = await deleteRoutineFromSupabase(routineId);
+      if (!deleted) console.warn('[Supabase] Eliminación de rutina pendiente de sincronización');
     }
     setRoutinesByStudent((prev) => {
       const copy: Record<string, Rutina[]> = {};
@@ -707,6 +758,12 @@ export default function App() {
   const handleSaveEvaluacion = async (evaluacion: EvaluacionClinica) => {
     await saveEvaluacionClinica(evaluacion);
     setCurrentEvaluacion(evaluacion);
+    if (isSupabaseConfigured()) {
+      const result = await saveEvaluacionToSupabase(evaluacion);
+      if (!result.success) {
+        console.warn('[Supabase] Evaluación guardada localmente y pendiente de sincronización:', result.error);
+      }
+    }
   };
 
   const handleAddStudent = async (newAlumno: Omit<Alumno, 'id' | 'created_at' | 'updated_at'>) => {
@@ -733,6 +790,10 @@ export default function App() {
     }
 
     const newRoutine = await handleCreateNewRoutine(created.id);
+    if (isSupabaseConfigured()) {
+      const routineResult = await saveRoutineToSupabase(newRoutine);
+      if (!routineResult.success) console.warn('[Supabase] Rutina inicial pendiente de sincronización:', routineResult.error);
+    }
     setRoutinesByStudent((prev) => ({ ...prev, [created.id]: [newRoutine] }));
     setCurrentRutinas([newRoutine]);
     setAlumnos((prev) => [...prev, created]);
@@ -790,27 +851,6 @@ export default function App() {
     await deleteAlumno(studentId);
   };
 
-  const handleClearAllStudents = async () => {
-    setAlumnos([]);
-    setActiveDockStudents([]);
-    setSelectedStudentId(null);
-    setCurrentRutinas([]);
-    setCurrentEvaluacion(null);
-    setRoutinesByStudent({});
-    setStudentActiveDays({});
-    setStudentActiveRoutines({});
-    try {
-      localStorage.removeItem('fitpro_dock_student_ids');
-      localStorage.removeItem('fitpro_selected_student_id');
-    } catch {}
-
-    if (isSupabaseConfigured()) {
-      await clearAllStudentsFromSupabase();
-    }
-
-    await clearAllLocalAlumnos();
-  };
-
   const handleAddGrupo = async (newGrupo: Omit<Grupo, 'id'>) => {
     const profId = getProfesorIdForUser(currentUser);
     const created: Grupo = {
@@ -821,7 +861,8 @@ export default function App() {
     };
     await saveGrupo(created);
     if (isSupabaseConfigured()) {
-      saveGroupToSupabase(created, profId).catch((err) => console.warn('[Supabase]', err));
+      const saved = await saveGroupToSupabase(created, profId);
+      if (!saved) console.warn('[Supabase] Grupo pendiente de sincronización');
     }
     await loadData(currentUser);
   };
@@ -829,7 +870,8 @@ export default function App() {
   const handleEditGrupo = async (updatedGrupo: Grupo) => {
     await saveGrupo(updatedGrupo);
     if (isSupabaseConfigured()) {
-      saveGroupToSupabase(updatedGrupo).catch((err) => console.warn('[Supabase]', err));
+      const saved = await saveGroupToSupabase(updatedGrupo);
+      if (!saved) console.warn('[Supabase] Grupo pendiente de sincronización');
     }
     await loadData(currentUser);
   };
@@ -837,7 +879,8 @@ export default function App() {
   const handleDeleteGrupo = async (grupoId: string) => {
     await deleteGrupo(grupoId);
     if (isSupabaseConfigured()) {
-      deleteGroupFromSupabase(grupoId).catch((err) => console.warn('[Supabase]', err));
+      const deleted = await deleteGroupFromSupabase(grupoId);
+      if (!deleted) console.warn('[Supabase] Eliminación de grupo pendiente de sincronización');
     }
     await loadData(currentUser);
   };
@@ -855,7 +898,8 @@ export default function App() {
       setActiveDockStudents((prev) => prev.map((a) => (a.id === alumnoId ? updated : a)));
 
       if (isSupabaseConfigured()) {
-        saveStudentToSupabase(updated).catch((err) => console.warn('[Supabase]', err));
+        const result = await saveStudentToSupabase(updated);
+        if (!result.success) console.warn('[Supabase] Reasignación pendiente de sincronización:', result.error);
       }
       showToast('success', 'Grupo reasignado');
     }
@@ -869,13 +913,13 @@ export default function App() {
         created_at: new Date().toISOString(),
       };
 
-      setPagos((prev) => {
-        const updated = [newPago, ...prev.filter((p) => p.id !== newPago.id)];
-        try {
-          localStorage.setItem('fitpro_local_pagos', JSON.stringify(updated));
-        } catch {}
-        return updated;
-      });
+      await savePago(newPago);
+      setPagos((prev) => [newPago, ...prev.filter((p) => p.id !== newPago.id)]);
+
+      if (isSupabaseConfigured()) {
+        const result = await savePagoToSupabase(newPago);
+        if (!result.success) console.warn('[Supabase] Pago pendiente de sincronización:', result.error);
+      }
 
       const target = alumnos.find((a) => a.id === pagoData.alumno_id);
       if (target) {
@@ -898,13 +942,12 @@ export default function App() {
   };
 
   const handleDeletePayment = async (pagoId: string) => {
-    setPagos((prev) => {
-      const updated = prev.filter((p) => p.id !== pagoId);
-      try {
-        localStorage.setItem('fitpro_local_pagos', JSON.stringify(updated));
-      } catch {}
-      return updated;
-    });
+    await deletePago(pagoId);
+    setPagos((prev) => prev.filter((p) => p.id !== pagoId));
+    if (isSupabaseConfigured()) {
+      const deleted = await deletePagoFromSupabase(pagoId);
+      if (!deleted) console.warn('[Supabase] Anulación de pago pendiente de sincronización');
+    }
     showToast('info', 'Pago anulado correctamente');
   };
 
@@ -989,15 +1032,17 @@ export default function App() {
             <DollarSign className="w-3.5 h-3.5" />
             <span>Pagos</span>
           </button>
-          <button
-            onClick={() => setActiveView('admin')}
-            className={`flex-1 py-2 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
-              activeView === 'admin' ? 'bg-emerald-600 text-white shadow' : 'text-amber-400 hover:text-amber-300'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Admin</span>
-          </button>
+          {isPlatformAdmin && (
+            <button
+              onClick={() => setActiveView('admin')}
+              className={`flex-1 py-2 rounded-xl font-bold transition flex items-center justify-center gap-1.5 ${
+                activeView === 'admin' ? 'bg-emerald-600 text-white shadow' : 'text-amber-400 hover:text-amber-300'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Admin</span>
+            </button>
+          )}
         </div>
 
         {/* View 0: Dashboard Home */}
@@ -1029,7 +1074,6 @@ export default function App() {
             onEditStudent={handleEditStudent}
             onDeleteStudent={handleDeleteStudent}
             onAddGrupo={handleAddGrupo}
-            onClearAllStudents={handleClearAllStudents}
             onNavigateToGroups={() => setActiveView('grupos')}
           />
         )}
@@ -1250,7 +1294,7 @@ export default function App() {
         )}
 
         {/* View 6: Pantalla de Gestión de Usuarios y Métricas (Exclusivo Administrador Jonatan Lippo) */}
-        {activeView === 'admin' && (
+        {activeView === 'admin' && isPlatformAdmin && (
           <AdminDashboard
             currentUserEmail={currentUser.email}
             users={profesoresList}

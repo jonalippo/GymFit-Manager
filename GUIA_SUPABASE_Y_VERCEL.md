@@ -7,7 +7,7 @@ Esta guía te explica detalladamente, paso a paso, cómo abrir este proyecto en 
 ## 1. Cómo abrir y ejecutar el proyecto en Visual Studio Code
 
 ### Requisitos previos
-- **Node.js** (versión 18 o superior) instalado en tu computadora. Puedes descargarlo gratis desde [nodejs.org](https://nodejs.org/).
+- **Node.js 22 o superior** instalado en tu computadora. Las versiones actuales de Vite, TypeScript y Supabase del proyecto requieren Node 22+; puedes descargarlo desde [nodejs.org](https://nodejs.org/).
 - **Visual Studio Code** instalado.
 
 ### Pasos:

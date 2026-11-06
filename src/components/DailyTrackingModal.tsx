@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { Alumno, SeguimientoDiario } from '../types';
 import { getSeguimientoDiario, saveSeguimientoDiario } from '../db/indexedDb';
+import {
+  fetchSeguimientosFromSupabase,
+  isSupabaseConfigured,
+  saveSeguimientoToSupabase,
+} from '../db/supabaseClient';
 import { Flame, Activity, X, Plus, Calendar, Check } from 'lucide-react';
 
 interface DailyTrackingModalProps {
@@ -31,8 +36,22 @@ export const DailyTrackingModal: React.FC<DailyTrackingModalProps> = ({
 
   const loadHistory = async () => {
     try {
-      const logs = await getSeguimientoDiario(alumno.id);
-      setHistory(logs);
+      const localLogs = await getSeguimientoDiario(alumno.id);
+      if (!isSupabaseConfigured()) {
+        setHistory(localLogs);
+        return;
+      }
+      const cloudLogs = await fetchSeguimientosFromSupabase(alumno.id);
+      if (!cloudLogs) {
+        setHistory(localLogs);
+        return;
+      }
+      const logsById = new Map(localLogs.map((log) => [log.id, log]));
+      cloudLogs.forEach((log) => logsById.set(log.id, log));
+      const merged = Array.from(logsById.values()).sort(
+        (a, b) => new Date(b.fecha).getTime() - new Date(a.fecha).getTime()
+      );
+      setHistory(merged);
     } catch {
       // ignore
     }
@@ -53,6 +72,12 @@ export const DailyTrackingModal: React.FC<DailyTrackingModalProps> = ({
     };
 
     await saveSeguimientoDiario(newLog);
+    if (isSupabaseConfigured()) {
+      const result = await saveSeguimientoToSupabase(newLog);
+      if (!result.success) {
+        console.warn('[Supabase] Seguimiento guardado localmente y pendiente de sincronización:', result.error);
+      }
+    }
     setSaving(false);
     setNotas('');
     await loadHistory();

@@ -352,25 +352,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, defaultEmail = 
         }
       }
 
-      // La cuenta administradora nunca puede usar el modo local: requiere
-      // validación de contraseña por Supabase.
-      if (isOwnerEmail(cleanEmail)) {
-        setAuthError('No se puede validar la contraseña del administrador sin conexión a Supabase. Intenta nuevamente cuando el servicio esté disponible.');
-        return;
-      }
-
-      // Modo Local / Fallback Seguro (con aislamiento estricto por usuario)
-      handleRememberEmail(cleanEmail);
-      const isolatedId = getProfesorIdForEmail(cleanEmail);
-      const displayName = isOwnerEmail(cleanEmail) ? 'Jonatan Lippo' : cleanEmail.split('@')[0];
-
-      onLogin({
-        id: isolatedId,
-        name: displayName,
-        email: cleanEmail,
-        role: 'admin_gimnasio',
-        gymName: 'Centro de Entrenamiento'
-      });
+      // No existe un modo local con credenciales simuladas: tanto desarrollo
+      // como producción deben validar la contraseña con Supabase Auth.
+      setAuthError('No se puede validar tu contraseña porque Supabase no está configurado o no responde. Verifica la conexión e inténtalo nuevamente.');
+      return;
     } catch (err: any) {
       console.error('[Login Error]', err);
       setAuthError('Ocurrió un error inesperado al iniciar sesión.');
@@ -457,10 +442,23 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin, defaultEmail = 
         // Registrar en la tabla profesores (los usuarios nuevos inician inactivos hasta abonar membresía y ser aprobados)
         const isOwner = isOwnerEmail(cleanEmail);
         const profId = isOwner ? 'prof-1' : `prof_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const orgId = `org-${profId}`;
         try {
+          // El perfil y la organización usan los mismos IDs que el cliente.
+          // Así RLS puede resolver el tenant desde la primera sesión.
+          const { error: orgError } = await supabase.from('organizaciones').insert({
+            id: orgId,
+            nombre: gymName.trim() || 'Mi Gimnasio',
+            plan_suscripcion: 'starter',
+            max_profesores: 3,
+          });
+          if (orgError && !orgError.message.toLowerCase().includes('duplicate')) {
+            console.warn('[Supabase SignUp Organización]', orgError);
+          }
           await supabase.from('profesores').upsert({
             id: profId,
             auth_user_id: signUpData?.user?.id || `auth-${Date.now()}`,
+            organizacion_id: orgId,
             nombre: name.trim(),
             email: cleanEmail,
             gym_name: gymName.trim(),

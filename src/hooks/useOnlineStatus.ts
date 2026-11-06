@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { clearSyncQueue, getPendingMutationsCount, subscribeToDBChanges } from '../db/indexedDb';
+import { getPendingMutationsCount, subscribeToDBChanges } from '../db/indexedDb';
+import { syncPendingMutations } from '../db/syncQueue';
 
 export function useOnlineStatus() {
   const [isOnline, setIsOnline] = useState<boolean>(
@@ -17,6 +18,22 @@ export function useOnlineStatus() {
       // ignore
     }
   }, []);
+
+  const triggerBackgroundSync = useCallback(async () => {
+    if (!navigator.onLine || isSyncing) return;
+    setIsSyncing(true);
+    try {
+      const result = await syncPendingMutations();
+      setPendingCount(result.pending);
+      if (result.synced > 0 || result.pending === 0) {
+        setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      }
+    } catch (err) {
+      console.error('Error in background sync', err);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [isSyncing]);
 
   useEffect(() => {
     const handleOnline = () => {
@@ -40,23 +57,13 @@ export function useOnlineStatus() {
       window.removeEventListener('offline', handleOffline);
       unsub();
     };
-  }, [checkPending]);
+  }, [checkPending, triggerBackgroundSync]);
 
-  const triggerBackgroundSync = async () => {
-    if (!navigator.onLine) return;
-    setIsSyncing(true);
-    // Simulate background push to Supabase with resolve
-    try {
-      await new Promise((resolve) => setTimeout(resolve, 800));
-      await clearSyncQueue();
-      setPendingCount(0);
-      setLastSyncTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    } catch (err) {
-      console.error('Error in background sync', err);
-    } finally {
-      setIsSyncing(false);
+  useEffect(() => {
+    if (isOnline && pendingCount > 0 && !isSyncing) {
+      triggerBackgroundSync();
     }
-  };
+  }, [isOnline, pendingCount, isSyncing, triggerBackgroundSync]);
 
   return {
     isOnline,
