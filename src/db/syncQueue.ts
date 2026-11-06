@@ -1,4 +1,4 @@
-import { getSyncIdentity, getSyncQueue, removeSyncQueueItems } from './indexedDb';
+import { compactSyncQueueForOwner, getSyncIdentity, getSyncQueue, removeSyncQueueItems } from './indexedDb';
 import {
   deleteGroupFromSupabase,
   deletePagoFromSupabase,
@@ -36,12 +36,17 @@ export async function syncPendingMutations(): Promise<{ synced: number; pending:
   const queued = (await getSyncQueue()) as QueuedMutation[];
   const identity = getSyncIdentity();
   if (!identity) return { synced: 0, pending: queued.length };
+  // Queues created before identities were added have no owner. Only the
+  // platform owner's historical queue can be recovered automatically.
+  const recoverLegacy = identity.profesorId === 'prof-1';
+  await compactSyncQueueForOwner(identity.userId, recoverLegacy);
+  const compactedQueue = (await getSyncQueue()) as QueuedMutation[];
   const acknowledged: number[] = [];
 
-  for (const mutation of queued) {
-    // Legacy mutations have no owner and are retained for explicit recovery;
-    // they are never replayed under an unrelated session.
-    if (mutation.owner_user_id !== identity.userId) continue;
+  for (const mutation of compactedQueue) {
+    const isCurrentOwner = mutation.owner_user_id === identity.userId;
+    const isRecoverableLegacy = recoverLegacy && !mutation.owner_user_id;
+    if (!isCurrentOwner && !isRecoverableLegacy) continue;
     let success = false;
     const payload: any = mutation.payload;
     try {
@@ -66,5 +71,6 @@ export async function syncPendingMutations(): Promise<{ synced: number; pending:
   }
 
   await removeSyncQueueItems(acknowledged);
-  return { synced: acknowledged.length, pending: queued.length - acknowledged.length };
+  const remaining = await getSyncQueue();
+  return { synced: acknowledged.length, pending: remaining.length };
 }

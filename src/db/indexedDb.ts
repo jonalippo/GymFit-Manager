@@ -283,18 +283,22 @@ export async function getAlumnos(): Promise<Alumno[]> {
   });
 }
 
-export async function saveAlumno(alumno: Alumno): Promise<void> {
+/** `enqueue=false` is reserved for data just read from Supabase. */
+export async function saveAlumno(alumno: Alumno, enqueue = true): Promise<void> {
   const db = await openDB();
   const tx = db.transaction(['alumnos', 'sync_queue'], 'readwrite');
-  alumno.updated_at = new Date().toISOString();
+  // Never manufacture a newer timestamp while only caching the cloud copy.
+  if (enqueue) alumno.updated_at = new Date().toISOString();
   tx.objectStore('alumnos').put(alumno);
-  tx.objectStore('sync_queue').add(queuePayload({
-    table: 'alumnos',
-    action: 'upsert',
-    record_id: alumno.id,
-    timestamp: new Date().toISOString(),
-    payload: alumno
-  }));
+  if (enqueue) {
+    tx.objectStore('sync_queue').add(queuePayload({
+      table: 'alumnos',
+      action: 'upsert',
+      record_id: alumno.id,
+      timestamp: new Date().toISOString(),
+      payload: alumno
+    }));
+  }
 
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => {
@@ -316,17 +320,19 @@ export async function getGrupos(): Promise<Grupo[]> {
   });
 }
 
-export async function saveGrupo(grupo: Grupo): Promise<void> {
+export async function saveGrupo(grupo: Grupo, enqueue = true): Promise<void> {
   const db = await openDB();
   const tx = db.transaction(['grupos', 'sync_queue'], 'readwrite');
   tx.objectStore('grupos').put(grupo);
-  tx.objectStore('sync_queue').add(queuePayload({
-    table: 'grupos',
-    action: 'upsert',
-    record_id: grupo.id,
-    timestamp: new Date().toISOString(),
-    payload: grupo
-  }));
+  if (enqueue) {
+    tx.objectStore('sync_queue').add(queuePayload({
+      table: 'grupos',
+      action: 'upsert',
+      record_id: grupo.id,
+      timestamp: new Date().toISOString(),
+      payload: grupo
+    }));
+  }
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => {
       notifyDBChanged();
@@ -508,7 +514,7 @@ export async function getAllRutinas(): Promise<Rutina[]> {
   });
 }
 
-export async function saveRutina(rutina: Rutina): Promise<void> {
+export async function saveRutina(rutina: Rutina, enqueue = true): Promise<void> {
   const db = await openDB();
   const tx = db.transaction(['rutinas', 'sync_queue'], 'readwrite');
   const normalizedRutina = sortRoutineBloquesAndEjercicios({
@@ -517,13 +523,15 @@ export async function saveRutina(rutina: Rutina): Promise<void> {
   });
 
   tx.objectStore('rutinas').put(normalizedRutina);
-  tx.objectStore('sync_queue').add(queuePayload({
-    table: 'rutinas',
-    action: 'upsert',
-    record_id: normalizedRutina.id,
-    timestamp: new Date().toISOString(),
-    payload: normalizedRutina
-  }));
+  if (enqueue) {
+    tx.objectStore('sync_queue').add(queuePayload({
+      table: 'rutinas',
+      action: 'upsert',
+      record_id: normalizedRutina.id,
+      timestamp: new Date().toISOString(),
+      payload: normalizedRutina
+    }));
+  }
 
   // Guardar inmediatamente en respaldo de localStorage
   try {
@@ -569,7 +577,7 @@ export async function getEvaluacionClinica(alumnoId: string): Promise<Evaluacion
   });
 }
 
-export async function saveEvaluacionClinica(evaluacion: EvaluacionClinica): Promise<void> {
+export async function saveEvaluacionClinica(evaluacion: EvaluacionClinica, enqueue = true): Promise<void> {
   const db = await openDB();
   const tx = db.transaction(['evaluaciones_clinicas', 'alumnos', 'sync_queue'], 'readwrite');
   tx.objectStore('evaluaciones_clinicas').put(evaluacion);
@@ -589,13 +597,15 @@ export async function saveEvaluacionClinica(evaluacion: EvaluacionClinica): Prom
     }
   };
 
-  tx.objectStore('sync_queue').add(queuePayload({
-    table: 'evaluaciones_clinicas',
-    action: 'upsert',
-    record_id: evaluacion.id,
-    timestamp: new Date().toISOString(),
-    payload: evaluacion
-  }));
+  if (enqueue) {
+    tx.objectStore('sync_queue').add(queuePayload({
+      table: 'evaluaciones_clinicas',
+      action: 'upsert',
+      record_id: evaluacion.id,
+      timestamp: new Date().toISOString(),
+      payload: evaluacion
+    }));
+  }
 
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => {
@@ -731,6 +741,24 @@ export async function getSyncQueue(): Promise<any[]> {
     req.onsuccess = () => resolve(req.result || []);
     req.onerror = () => reject(req.error);
   });
+}
+
+/**
+ * Keeps the final pending operation for each record. This is safe because an
+ * upsert is a full record snapshot and a final delete supersedes earlier work.
+ * Operations from another signed-in account are never examined or removed.
+ */
+export async function compactSyncQueueForOwner(ownerUserId: string, includeLegacy = false): Promise<number> {
+  const queue = await getSyncQueue();
+  const eligible = queue
+    .filter((item) => item.owner_user_id === ownerUserId || (includeLegacy && !item.owner_user_id))
+    .sort((a, b) => Number(a.id) - Number(b.id));
+  const latest = new Map<string, any>();
+  for (const item of eligible) latest.set(`${item.table}:${item.record_id}`, item);
+  const removeIds = eligible.filter((item) => latest.get(`${item.table}:${item.record_id}`).id !== item.id)
+    .map((item) => item.id as number);
+  await removeSyncQueueItems(removeIds);
+  return removeIds.length;
 }
 
 export async function getPendingMutationsCount(): Promise<number> {

@@ -380,7 +380,8 @@ export default function App() {
             userAlumnos = Array.from(mergedAlumnosMap.values());
 
             for (const a of userAlumnos) {
-              await saveAlumno(a);
+              // Hydrating the local cache from the cloud is not a new edit.
+              await saveAlumno(a, false);
               const cloudRuts = await fetchRoutinesFromSupabase(a.id);
               const localRuts = await getRutinasByAlumno(a.id);
 
@@ -391,14 +392,14 @@ export default function App() {
                   const cloudEjsCount = cr.bloques?.reduce((acc, b) => acc + (b.ejercicios?.length || 0), 0) || 0;
 
                   if (!lr) {
-                    await saveRutina(cr);
+                    await saveRutina(cr, false);
                   } else if (localEjsCount > 0 && cloudEjsCount === 0) {
                     saveRoutineToSupabase(lr).catch((e) => console.warn('[Sync to Cloud]', e));
                   } else if (localEjsCount > cloudEjsCount) {
                     saveRoutineToSupabase(lr).catch((e) => console.warn('[Sync to Cloud]', e));
                   } else if (cloudEjsCount >= localEjsCount) {
                     if (!lr.updated_at || new Date(cr.updated_at).getTime() > new Date(lr.updated_at).getTime()) {
-                      await saveRutina(cr);
+                      await saveRutina(cr, false);
                     } else if (new Date(lr.updated_at).getTime() > new Date(cr.updated_at).getTime()) {
                       saveRoutineToSupabase(lr).catch((e) => console.warn('[Sync to Cloud]', e));
                     }
@@ -421,7 +422,7 @@ export default function App() {
           if (cloudGrupos && cloudGrupos.length > 0) {
             userGrupos = cloudGrupos;
             for (const g of cloudGrupos) {
-              await saveGrupo(g);
+              await saveGrupo(g, false);
             }
           }
         } catch (e) {
@@ -607,7 +608,7 @@ export default function App() {
           if (!isSupabaseConfigured()) return local;
           const cloud = await fetchLatestEvaluacionFromSupabase(alumno.id);
           if (cloud && (!local || new Date(cloud.fecha).getTime() > new Date(local.fecha).getTime())) {
-            await saveEvaluacionClinica(cloud);
+            await saveEvaluacionClinica(cloud, false);
             return cloud;
           }
           return local;
